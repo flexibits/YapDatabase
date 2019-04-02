@@ -4645,6 +4645,19 @@
 **/
 - (void)setObject:(id)object forKey:(NSString *)key inCollection:(NSString *)collection
 {
+    if([object respondsToSelector:@selector(dueDate)] && [object respondsToSelector:@selector(identifier)]){
+        NSString *identifier = [object performSelector:@selector(identifier)];
+        NSDate *dueDate = [object performSelector:@selector(dueDate)];
+        NSDateComponents *comps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:dueDate];
+        
+        if([comps second]){
+            NSLog(@"Saving task with non-zero second dueDate!");
+            NSLog(@" - identifier: %@", identifier);
+            NSLog(@" - dueDate: %@", dueDate);
+            NSLog(@" - stack: %@", [NSThread callStackSymbols]);
+        }
+    }
+
 	[self setObject:object forKey:key inCollection:collection withMetadata:nil
                                                           serializedObject:nil
 	                                                    serializedMetadata:nil];
