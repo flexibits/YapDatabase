@@ -4648,12 +4648,15 @@
     if([object respondsToSelector:@selector(dueDate)] && [object respondsToSelector:@selector(identifier)]){
         NSString *identifier = [object performSelector:@selector(identifier)];
         NSDate *dueDate = [object performSelector:@selector(dueDate)];
-        NSDateComponents *comps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:dueDate];
-        
-        if([comps second]){
+        NSDate *primaryDate = [object performSelector:@selector(primaryDate)];
+        NSDateComponents *dueComps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:dueDate];
+        NSDateComponents *primaryComps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:primaryDate];
+
+        if([dueComps second] || [primaryComps second]){
             NSLog(@"Saving task with non-zero second dueDate!");
             NSLog(@" - identifier: %@", identifier);
             NSLog(@" - dueDate: %@", dueDate);
+            NSLog(@" - primaryDate: %@", primaryDate);
             NSLog(@" - stack: %@", [NSThread callStackSymbols]);
         }
     }
