@@ -4653,11 +4653,11 @@
         NSDateComponents *primaryComps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:primaryDate];
 
         if([dueComps second] || [primaryComps second]){
-            NSLog(@"Saving task with non-zero second dueDate!");
-            NSLog(@" - identifier: %@", identifier);
-            NSLog(@" - dueDate: %@", dueDate);
-            NSLog(@" - primaryDate: %@", primaryDate);
-            NSLog(@" - stack: %@", [NSThread callStackSymbols]);
+            YDBLogError(@"Saving task with non-zero second dueDate!");
+            YDBLogError(@" - identifier: %@", identifier);
+            YDBLogError(@" - dueDate: %@", dueDate);
+            YDBLogError(@" - primaryDate: %@", primaryDate);
+            YDBLogError(@" - stack: %@", [NSThread callStackSymbols]);
         }
     }
 
