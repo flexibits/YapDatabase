@@ -4649,9 +4649,9 @@
         NSString *identifier = [object performSelector:@selector(identifier)];
         NSDate *dueDate = [object performSelector:@selector(dueDate)];
         NSDate *primaryDate = [object performSelector:@selector(primaryDate)];
-        NSDateComponents *dueComps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:dueDate];
-        NSDateComponents *primaryComps = [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:primaryDate];
-
+        NSDateComponents *dueComps = dueComps ? [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:dueDate] : nil;
+        NSDateComponents *primaryComps = primaryDate ? [[NSCalendar currentCalendar] components:NSCalendarUnitSecond fromDate:primaryDate] : nil;
+        
         if([dueComps second] || [primaryComps second]){
             YDBLogError(@"Saving task with non-zero second dueDate!");
             YDBLogError(@" - identifier: %@", identifier);
