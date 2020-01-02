@@ -3062,6 +3062,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 
 - (void)passiveCheckpoint
 {
+    if ([self preCheckpointHandler]) {
+        [self preCheckpointHandler](NO);
+    }
+
 	int checkpointResult = 0;
 	int totalFrameCount = 0;
 	int checkpointedFrameCount = 0;
@@ -3089,7 +3093,11 @@ static int connectionBusyHandler(void *ptr, int count) {
 		else {
 			YDBLogWarn(@"sqlite3_wal_checkpoint_v2 returned error code: %d", checkpointResult);
 		}
-		
+
+        if ([self postCheckpointHandler]) {
+            [self postCheckpointHandler](NO);
+        }
+
 		return;// from_block
 	}
 	
@@ -3127,7 +3135,11 @@ static int connectionBusyHandler(void *ptr, int count) {
 		#pragma clang diagnostic pop
 		}});
 	}
-	
+
+    if ([self postCheckpointHandler]) {
+        [self postCheckpointHandler](NO);
+    }
+
 	// Is the WAL file getting too big ?
 	
 	uint64_t walApproximateFileSize = totalFrameCount * pageSize;
@@ -3143,6 +3155,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 
 - (void)aggressiveCheckpoint
 {
+    if ([self preCheckpointHandler]) {
+        [self preCheckpointHandler](YES);
+    }
+
 	int checkpointResult = 0;
 	int totalFrameCount = 0;
 	int checkpointedFrameCount = 0;
@@ -3168,6 +3184,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 	
 	if (totalFrameCount != checkpointedFrameCount)
 	{
+        if ([self postCheckpointHandler]) {
+            [self postCheckpointHandler](YES);
+        }
+
 		return;
 	}
 	
@@ -3179,6 +3199,11 @@ static int connectionBusyHandler(void *ptr, int count) {
 	if (![self tryResetLongLivedReadTransactions])
 	{
 		YDBLogInfo(@"Aggressive checkpoint spoiled: longLivedReadTransaction is blocking");
+
+        if ([self postCheckpointHandler]) {
+            [self postCheckpointHandler](YES);
+        }
+
 		return;
 	}
 	
@@ -3284,6 +3309,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 		
 		atomic_store(&aggressiveCheckpointEnabled, false);
 	}
+
+    if ([self postCheckpointHandler]) {
+        [self postCheckpointHandler](YES);
+    }
 }
 
 - (BOOL)tryResetLongLivedReadTransactions

@@ -105,6 +105,16 @@ typedef id __nonnull (^YapDatabasePreSanitizer)(NSString *collection, NSString *
 typedef void (^YapDatabasePostSanitizer)(NSString *collection, NSString *key, id obj);
 
 /**
+ * These blocks allow you to run operations in response to a passive or aggressive checkpoint.
+ *
+ * One reason why you'd need these is to start UIApplication background tasks if a checkpoint occurs while the
+ * app is running in the background on iOS. Otherwise if a checkpoint occurs in the background and takes too long
+ * it can result in the system killing the app with a 0xdead110c termination reason.
+ */
+typedef void (^YapDatabasePreCheckpointHandler)(BOOL aggressive);
+typedef void (^YapDatabasePostCheckpointHandler)(BOOL aggressive);
+
+/**
  * This notification is posted when a YapDatabase instance is deallocated,
  * and has thus closed all references to the underlying sqlite files.
  * 
@@ -343,6 +353,9 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
 
 @property (nonatomic, copy, readonly, nullable) YapDatabasePreSanitizer metadataPreSanitizer;
 @property (nonatomic, copy, readonly, nullable) YapDatabasePostSanitizer metadataPostSanitizer;
+
+@property (nonatomic, copy, nullable) YapDatabasePreCheckpointHandler preCheckpointHandler;
+@property (nonatomic, copy, nullable) YapDatabasePostCheckpointHandler postCheckpointHandler;
 
 @property (nonatomic, copy, readonly) YapDatabaseOptions *options;
 
