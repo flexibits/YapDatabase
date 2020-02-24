@@ -1164,7 +1164,7 @@ static NSString *const ext_key_version_deprecated = @"version";
 		}
 		else
 		{
-			YDBLogWarn(@"Unable to bind value for with unsupported class: %@", NSStringFromClass([value class]));
+			YDBLogWarn(@"Unable to bind value for with unsupported class: %@ (statement: %s, parameters: %@)", NSStringFromClass([value class]), sqlite3_sql(statement), queryParams);
 		}
 		
 		bind_idx++;
