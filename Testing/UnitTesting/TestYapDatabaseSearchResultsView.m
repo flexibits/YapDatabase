@@ -6,35 +6,42 @@
 #import "YapDatabaseSearchResultsView.h"
 #import "YapCollectionKey.h"
 
-#import <CocoaLumberjack/CocoaLumberjack.h>
-#import <CocoaLumberjack/DDTTYLogger.h>
-
 
 @interface TestYapDatabaseSearchResultsView : XCTestCase
 @end
 
 @implementation TestYapDatabaseSearchResultsView
 
-- (NSString *)databasePath:(NSString *)suffix
+- (NSString *)fileName
 {
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-	NSString *baseDir = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
+	NSString *filePath = [NSString stringWithFormat:@"%s", __FILE__];
+	NSString *fileName = [filePath lastPathComponent];
 	
-	NSString *databaseName = [NSString stringWithFormat:@"%@-%@.sqlite", THIS_FILE, suffix];
+	NSUInteger dotLocation = [fileName rangeOfString:@"." options:NSBackwardsSearch].location;
+	if (dotLocation != NSNotFound) {
+		 fileName = [fileName substringToIndex:dotLocation];
+	}
 	
-	return [baseDir stringByAppendingPathComponent:databaseName];
+	return fileName;
+}
+
+- (NSURL *)databaseURL:(NSString *)suffix
+{
+	NSString *databaseName = [NSString stringWithFormat:@"%@-%@.sqlite", [self fileName], suffix];
+	
+	NSArray<NSURL*> *urls = [[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask];
+	NSURL *baseDir = [urls firstObject];
+	
+	return [baseDir URLByAppendingPathComponent:databaseName isDirectory:NO];
 }
 
 - (void)setUp
 {
 	[super setUp];
-	[DDLog removeAllLoggers];
-	[DDLog addLogger:[DDTTYLogger sharedInstance]];
 }
 
 - (void)tearDown
 {
-	[DDLog flushLog];
 	[super tearDown];
 }
 
@@ -81,17 +88,17 @@
 
 - (void)test1_parentView_memory_withoutSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseSearchResultsViewOptions *searchViewOptions = [[YapDatabaseSearchResultsViewOptions alloc] init];
 	searchViewOptions.isPersistent = NO;
 	
-	[self _test1_parentView_withPath:databasePath options:searchViewOptions];
+	[self _test1_parentView_withURL:databaseURL options:searchViewOptions];
 }
 
 - (void)test1_parentView_memory_withSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseFullTextSearchSnippetOptions *snippetOptions = [[YapDatabaseFullTextSearchSnippetOptions alloc] init];
 	snippetOptions.numberOfTokens = 5;
@@ -100,22 +107,22 @@
 	searchViewOptions.isPersistent = NO;
 	searchViewOptions.snippetOptions = snippetOptions;
 	
-	[self _test1_parentView_withPath:databasePath options:searchViewOptions];
+	[self _test1_parentView_withURL:databaseURL options:searchViewOptions];
 }
 
 - (void)test1_parentView_persistent_withoutSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseSearchResultsViewOptions *searchViewOptions = [[YapDatabaseSearchResultsViewOptions alloc] init];
 	searchViewOptions.isPersistent = YES;
 	
-	[self _test1_parentView_withPath:databasePath options:searchViewOptions];
+	[self _test1_parentView_withURL:databaseURL options:searchViewOptions];
 }
 
 - (void)test1_parentView_persistent_withSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseFullTextSearchSnippetOptions *snippetOptions = [[YapDatabaseFullTextSearchSnippetOptions alloc] init];
 	snippetOptions.numberOfTokens = 5;
@@ -124,14 +131,14 @@
 	searchViewOptions.isPersistent = YES;
 	searchViewOptions.snippetOptions = snippetOptions;
 	
-	[self _test1_parentView_withPath:databasePath options:searchViewOptions];
+	[self _test1_parentView_withURL:databaseURL options:searchViewOptions];
 }
 
-- (void)_test1_parentView_withPath:(NSString *)databasePath
+- (void)_test1_parentView_withURL:(NSURL *)databaseURL
                            options:(YapDatabaseSearchResultsViewOptions *)searchViewOptions
 {
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database, @"Oops");
 	
@@ -202,17 +209,17 @@
 
 - (void)test1_blocks_memory_withoutSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseSearchResultsViewOptions *searchViewOptions = [[YapDatabaseSearchResultsViewOptions alloc] init];
 	searchViewOptions.isPersistent = NO;
 	
-	[self _test1_blocks_withPath:databasePath options:searchViewOptions];
+	[self _test1_blocks_withURL:databaseURL options:searchViewOptions];
 }
 
 - (void)test1_blocks_memory_withSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseFullTextSearchSnippetOptions *snippetOptions = [[YapDatabaseFullTextSearchSnippetOptions alloc] init];
 	snippetOptions.numberOfTokens = 5;
@@ -221,22 +228,22 @@
 	searchViewOptions.isPersistent = NO;
 	searchViewOptions.snippetOptions = snippetOptions;
 	
-	[self _test1_blocks_withPath:databasePath options:searchViewOptions];
+	[self _test1_blocks_withURL:databaseURL options:searchViewOptions];
 }
 
 - (void)test1_blocks_persistent_withoutSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseSearchResultsViewOptions *searchViewOptions = [[YapDatabaseSearchResultsViewOptions alloc] init];
 	searchViewOptions.isPersistent = YES;
 	
-	[self _test1_blocks_withPath:databasePath options:searchViewOptions];
+	[self _test1_blocks_withURL:databaseURL options:searchViewOptions];
 }
 
 - (void)test1_blocks_persistent_withSnippets
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseFullTextSearchSnippetOptions *snippetOptions = [[YapDatabaseFullTextSearchSnippetOptions alloc] init];
 	snippetOptions.numberOfTokens = 5;
@@ -245,14 +252,14 @@
 	searchViewOptions.isPersistent = YES;
 	searchViewOptions.snippetOptions = snippetOptions;
 	
-	[self _test1_blocks_withPath:databasePath options:searchViewOptions];
+	[self _test1_blocks_withURL:databaseURL options:searchViewOptions];
 }
 
-- (void)_test1_blocks_withPath:(NSString *)databasePath
+- (void)_test1_blocks_withURL:(NSURL *)databaseURL
                        options:(YapDatabaseSearchResultsViewOptions *)searchViewOptions
 {
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database, @"Oops");
 	

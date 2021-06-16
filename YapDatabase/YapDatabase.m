@@ -15,6 +15,7 @@
 #endif
 
 #import <mach/mach_time.h>
+#import <os/log.h>
 #import <stdatomic.h>
 
 #if ! __has_feature(objc_arc)
@@ -26,11 +27,11 @@
  * See YapDatabaseLogging.h for more information.
 **/
 #if robbie_hanson
-  static const int ydbLogLevel = YDB_LOG_LEVEL_INFO;
+  static const int ydbLogLevel = YDBLogLevelInfo;
 #elif DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_INFO;
+  static const int ydbLogLevel = YDBLogLevelInfo;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -40,9 +41,9 @@
 
 NSString *const YapDatabaseClosedNotification = @"YapDatabaseClosedNotification";
 
-NSString *const YapDatabasePathKey    = @"databasePath";
-NSString *const YapDatabasePathWalKey = @"databasePath_wal";
-NSString *const YapDatabasePathShmKey = @"databasePath_shm";
+NSString *const YapDatabaseUrlKey    = @"databaseURL";
+NSString *const YapDatabaseUrlWalKey = @"databaseURL_wal";
+NSString *const YapDatabaseUrlShmKey = @"databaseURL_shm";
 
 /**
  * YapDatabaseModifiedNotification & corresponding keys.
@@ -107,6 +108,10 @@ static int connectionBusyHandler(void *ptr, int count) {
     return 1;
 }
 
+typedef void (^YDBLogHandler)(YDBLogMessage *);
+
+static YDBLogHandler logHandler = nil;
+
 @implementation YapDatabase {
 @private
 	
@@ -121,6 +126,25 @@ static int connectionBusyHandler(void *ptr, int count) {
 	dispatch_queue_t checkpointQueue;
 	
 	YapDatabaseConnectionConfig *connectionDefaults;
+	
+	YAPUnfairLock configLock;
+	
+	NSMutableDictionary<id, YapDatabaseSerializer> *objectSerializers;         // only accessible within configLock
+	NSMutableDictionary<id, YapDatabaseDeserializer> *objectDeserializers;     // only accessible within configLock
+	
+	NSMutableDictionary<id, YapDatabasePreSanitizer> *objectPreSanitizers;     // only accessible within configLock
+	NSMutableDictionary<id, YapDatabasePostSanitizer> *objectPostSanitizers;   // only accessible within configLock
+	
+	NSMutableDictionary<id, YapDatabaseSerializer> *metadataSerializers;       // only accessible within configLock
+	NSMutableDictionary<id, YapDatabaseDeserializer> *metadataDeserializers;   // only accessible within configLock
+	
+	NSMutableDictionary<id, YapDatabasePreSanitizer> *metadataPreSanitizers;   // only accessible within configLock
+	NSMutableDictionary<id, YapDatabasePostSanitizer> *metadataPostSanitizers; // only accessible within configLock
+
+  NSNumber *_defaultObjectPolicy; // only accessible within configLock
+	NSDictionary<NSString*, NSNumber*> *objectPolicies;   // only accessible within configLock
+  NSNumber *_defaultMetadataPolicy; // only accessible within configLock
+	NSDictionary<NSString*, NSNumber*> *metadataPolicies; // only accessible within configLock
 	
 	NSDictionary *registeredExtensions;
 	NSDictionary *registeredMemoryTables;
@@ -145,9 +169,43 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * The default serializer & deserializer use NSCoding (NSKeyedArchiver & NSKeyedUnarchiver).
- * Thus the objects need only support the NSCoding protocol.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
++ (NSURL *)defaultDatabaseURL
+{
+	NSError *error = nil;
+	NSURL *appSupportDir =
+	  [[NSFileManager defaultManager] URLForDirectory: NSApplicationSupportDirectory
+	                                         inDomain: NSUserDomainMask
+	                                appropriateForURL: nil
+	                                           create: YES
+	                                            error: &error];
+		
+#if !TARGET_OS_IPHONE // macOS
+	if (!error)
+	{
+		NSString *bundleIdentifier =
+		  [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString *)kCFBundleIdentifierKey];
+		
+		appSupportDir = [appSupportDir URLByAppendingPathComponent:bundleIdentifier isDirectory:YES];
+		
+		[[NSFileManager defaultManager] createDirectoryAtURL: appSupportDir
+		                         withIntermediateDirectories: YES
+		                                          attributes: nil
+		                                               error: &error];
+	}
+#endif
+	
+	return [appSupportDir URLByAppendingPathComponent:@"yapdb.sqlite" isDirectory:NO];
+}
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 + (YapDatabaseSerializer)defaultSerializer
 {
 	return ^ NSData* (NSString __unused *collection, NSString __unused *key, id object){
@@ -156,9 +214,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * The default serializer & deserializer use NSCoding (NSKeyedArchiver & NSKeyedUnarchiver).
- * Thus the objects need only support the NSCoding protocol.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 + (YapDatabaseDeserializer)defaultDeserializer
 {
 	return ^ id (NSString __unused *collection, NSString __unused *key, NSData *data){
@@ -167,29 +226,25 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Property lists ONLY support the following: NSData, NSString, NSArray, NSDictionary, NSDate, and NSNumber.
- * Property lists are highly optimized and are used extensively by Apple.
- *
- * Property lists make a good fit when your existing code already uses them,
- * such as replacing NSUserDefaults with a database.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 + (YapDatabaseSerializer)propertyListSerializer
 {
 	return ^ NSData* (NSString __unused *collection, NSString __unused *key, id object){
-		return [NSPropertyListSerialization dataWithPropertyList:object
-		                                                  format:NSPropertyListBinaryFormat_v1_0
-		                                                 options:NSPropertyListImmutable
-		                                                   error:NULL];
+		return [NSPropertyListSerialization dataWithPropertyList: object
+		                                                  format: NSPropertyListBinaryFormat_v1_0
+		                                                 options: NSPropertyListImmutable
+		                                                   error: NULL];
 	};
 }
 
 /**
- * Property lists ONLY support the following: NSData, NSString, NSArray, NSDictionary, NSDate, and NSNumber.
- * Property lists are highly optimized and are used extensively by Apple.
- *
- * Property lists make a good fit when your existing code already uses them,
- * such as replacing NSUserDefaults with a database.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 + (YapDatabaseDeserializer)propertyListDeserializer
 {
 	return ^ id (NSString __unused *collection, NSString __unused *key, NSData *data){
@@ -198,9 +253,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * A FASTER serializer than the default, if serializing ONLY a NSDate object.
- * You may want to use timestampSerializer & timestampDeserializer if your metadata is simply an NSDate.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 + (YapDatabaseSerializer)timestampSerializer
 {
 	return ^ NSData* (NSString __unused *collection, NSString __unused *key, id object) {
@@ -219,9 +275,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * A FASTER deserializer than the default, if deserializing data from timestampSerializer.
- * You may want to use timestampSerializer & timestampDeserializer if your metadata is simply an NSDate.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 + (YapDatabaseDeserializer)timestampDeserializer
 {
 	return ^ id (NSString __unused *collection, NSString __unused *key, NSData *data) {
@@ -241,36 +298,97 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Logging
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Used by the macros defined in YapDatabaseLogging.h
+ */
++ (void)log:(YDBLogLevel)level
+       flag:(YDBLogFlag)flag
+       file:(const char *)file
+   function:(const char *)function
+       line:(NSUInteger)line
+     format:(NSString *)format, ...
+{
+	va_list args;
+	if (format)
+	{
+		va_start(args, format);
+		NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+      va_end(args);
+		
+		YDBLogMessage *logMessage =
+		  [[YDBLogMessage alloc] initWithMessage: message
+		                                   level: level
+		                                    flag: flag
+		                                    file: [NSString stringWithFormat:@"%s", file]
+		                                function: [NSString stringWithFormat:@"%s", function]
+		                                    line: line];
+		
+		logHandler(logMessage);
+	}
+}
+
++ (YDBLogHandler)defaultLogHandler
+{
+	NSString *subsystem = @"yapdb";
+	NSString *category = @"yapdb";
+	
+	os_log_t logger = os_log_create([subsystem UTF8String], [category UTF8String]);
+	
+	YDBLogHandler handler = ^void (YDBLogMessage *log){ @autoreleasepool {
+		
+		if (log.flag & YDBLogFlagError) {
+			os_log_error(logger, "%{public}@ %{public}@", log.function, log.message);
+		}
+		else if (log.flag & YDBLogFlagWarning) {
+			os_log_info(logger, "%{public}@ %{public}@", log.function, log.message);
+		}
+	}};
+	return handler;
+}
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
++ (void)setLogHandler:(void (^)(YDBLogMessage *))inLogHandler
+{
+	logHandler = inLogHandler ?: [self defaultLogHandler];
+}
+
++ (void)initialize
+{
+	static BOOL initialized = NO;
+	if (!initialized) {
+		initialized = YES;
+		logHandler = [self defaultLogHandler];
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Properties
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-@synthesize databasePath = databasePath;
-@dynamic databasePath_wal;
-@dynamic databasePath_shm;
-
-@synthesize objectSerializer = objectSerializer;
-@synthesize objectDeserializer = objectDeserializer;
-
-@synthesize metadataSerializer = metadataSerializer;
-@synthesize metadataDeserializer = metadataDeserializer;
-
-@synthesize objectPreSanitizer = objectPreSanitizer;
-@synthesize objectPostSanitizer = objectPostSanitizer;
-
-@synthesize metadataPreSanitizer = metadataPreSanitizer;
-@synthesize metadataPostSanitizer = metadataPostSanitizer;
+@synthesize databaseURL = databaseURL;
+@dynamic databaseURL_wal;
+@dynamic databaseURL_shm;
 
 @dynamic options;
 @dynamic sqliteVersion;
 
-- (NSString *)databasePath_wal
+- (NSURL *)databaseURL_wal
 {
-	return [databasePath stringByAppendingString:@"-wal"];
+	NSString *path = [[databaseURL path] stringByAppendingString:@"-wal"];
+	return [NSURL fileURLWithPath:path isDirectory:NO];
 }
 
-- (NSString *)databasePath_shm
+- (NSURL *)databaseURL_shm
 {
-	return [databasePath stringByAppendingString:@"-shm"];
+	NSString *path = [[databaseURL path] stringByAppendingString:@"-shm"];
+	return [NSURL fileURLWithPath:path isDirectory:NO];
 }
 
 - (YapDatabaseOptions *)options
@@ -298,139 +416,40 @@ static int connectionBusyHandler(void *ptr, int count) {
 #pragma mark Init
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-- (id)initWithPath:(NSString *)inPath
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (instancetype)init
 {
-	return [self initWithPath:inPath
-	         objectSerializer:NULL
-	       objectDeserializer:NULL
-	       metadataSerializer:NULL
-	     metadataDeserializer:NULL
-	       objectPreSanitizer:NULL
-	      objectPostSanitizer:NULL
-	     metadataPreSanitizer:NULL
-	    metadataPostSanitizer:NULL
-	                  options:nil];
+	return [self initWithURL:[[self class] defaultDatabaseURL] options:nil];
 }
 
-- (id)initWithPath:(NSString *)inPath
-           options:(nullable YapDatabaseOptions *)inOptions
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (id)initWithURL:(NSURL *)inURL
 {
-	return [self initWithPath:inPath
-	         objectSerializer:NULL
-	       objectDeserializer:NULL
-	       metadataSerializer:NULL
-	     metadataDeserializer:NULL
-	       objectPreSanitizer:NULL
-	      objectPostSanitizer:NULL
-	     metadataPreSanitizer:NULL
-	    metadataPostSanitizer:NULL
-	                  options:inOptions];
+	return [self initWithURL:inURL options:nil];
 }
 
-- (id)initWithPath:(NSString *)inPath
-        serializer:(YapDatabaseSerializer)inSerializer
-      deserializer:(YapDatabaseDeserializer)inDeserializer
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (id)initWithURL:(NSURL *)inURL options:(nullable YapDatabaseOptions *)inOptions
 {
-	return [self initWithPath:inPath
-	         objectSerializer:inSerializer
-	       objectDeserializer:inDeserializer
-	       metadataSerializer:inSerializer
-	     metadataDeserializer:inDeserializer
-	       objectPreSanitizer:NULL
-	      objectPostSanitizer:NULL
-	     metadataPreSanitizer:NULL
-	    metadataPostSanitizer:NULL
-	                  options:nil];
-}
-
-- (id)initWithPath:(NSString *)inPath
-        serializer:(YapDatabaseSerializer)inSerializer
-      deserializer:(YapDatabaseDeserializer)inDeserializer
-           options:(YapDatabaseOptions *)inOptions
-{
-	return [self initWithPath:inPath
-	         objectSerializer:inSerializer
-	       objectDeserializer:inDeserializer
-	       metadataSerializer:inSerializer
-	     metadataDeserializer:inDeserializer
-	       objectPreSanitizer:NULL
-	      objectPostSanitizer:NULL
-	     metadataPreSanitizer:NULL
-	    metadataPostSanitizer:NULL
-	                  options:inOptions];
-}
-
-- (id)initWithPath:(NSString *)inPath
-        serializer:(YapDatabaseSerializer)inSerializer
-      deserializer:(YapDatabaseDeserializer)inDeserializer
-      preSanitizer:(YapDatabasePreSanitizer)inPreSanitizer
-     postSanitizer:(YapDatabasePostSanitizer)inPostSanitizer
-           options:(YapDatabaseOptions *)inOptions
-{
-	return [self initWithPath:inPath
-	         objectSerializer:inSerializer
-	       objectDeserializer:inDeserializer
-	       metadataSerializer:inSerializer
-	     metadataDeserializer:inDeserializer
-	       objectPreSanitizer:inPreSanitizer
-	      objectPostSanitizer:inPostSanitizer
-	     metadataPreSanitizer:inPreSanitizer
-	    metadataPostSanitizer:inPostSanitizer
-	                  options:inOptions];
-}
-
-- (id)initWithPath:(NSString *)inPath objectSerializer:(YapDatabaseSerializer)inObjectSerializer
-                                    objectDeserializer:(YapDatabaseDeserializer)inObjectDeserializer
-                                    metadataSerializer:(YapDatabaseSerializer)inMetadataSerializer
-                                  metadataDeserializer:(YapDatabaseDeserializer)inMetadataDeserializer
-{
-	return [self initWithPath:inPath
-	         objectSerializer:inObjectSerializer
-	       objectDeserializer:inObjectDeserializer
-	       metadataSerializer:inMetadataSerializer
-	     metadataDeserializer:inMetadataDeserializer
-	       objectPreSanitizer:NULL
-	      objectPostSanitizer:NULL
-	     metadataPreSanitizer:NULL
-	    metadataPostSanitizer:NULL
-	                  options:nil];
-}
-
-- (id)initWithPath:(NSString *)inPath objectSerializer:(YapDatabaseSerializer)inObjectSerializer
-                                    objectDeserializer:(YapDatabaseDeserializer)inObjectDeserializer
-                                    metadataSerializer:(YapDatabaseSerializer)inMetadataSerializer
-                                  metadataDeserializer:(YapDatabaseDeserializer)inMetadataDeserializer
-                                               options:(YapDatabaseOptions *)inOptions
-{
-	return [self initWithPath:inPath
-	         objectSerializer:inObjectSerializer
-	       objectDeserializer:inObjectDeserializer
-	       metadataSerializer:inMetadataSerializer
-	     metadataDeserializer:inMetadataDeserializer
-	       objectPreSanitizer:NULL
-	      objectPostSanitizer:NULL
-	     metadataPreSanitizer:NULL
-	    metadataPostSanitizer:NULL
-	                  options:inOptions];
-}
-
-- (id)initWithPath:(NSString *)inPath objectSerializer:(YapDatabaseSerializer)inObjectSerializer
-                                    objectDeserializer:(YapDatabaseDeserializer)inObjectDeserializer
-                                    metadataSerializer:(YapDatabaseSerializer)inMetadataSerializer
-                                  metadataDeserializer:(YapDatabaseDeserializer)inMetadataDeserializer
-                                    objectPreSanitizer:(YapDatabasePreSanitizer)inObjectPreSanitizer
-                                   objectPostSanitizer:(YapDatabasePostSanitizer)inObjectPostSanitizer
-                                  metadataPreSanitizer:(YapDatabasePreSanitizer)inMetadataPreSanitizer
-                                 metadataPostSanitizer:(YapDatabasePostSanitizer)inMetadataPostSanitizer
-                                               options:(YapDatabaseOptions *)inOptions
-{
-	// First, standardize path.
-	// This allows clients to be lazy when passing paths.
-	NSString *path = [inPath stringByStandardizingPath];
+	// Standardize the path.
+	// This allows for fileReferenceURL's, and non-standard paths to be passed without issue.
+	NSString *databasePath = [[[inURL filePathURL] path] stringByStandardizingPath];
 	
 	// Ensure there is only a single database instance per file.
 	// However, clients may create as many connections as desired.
-	if (![YapDatabaseManager registerDatabaseForPath:path])
+	if (![YapDatabaseManager registerDatabaseForPath:databasePath])
 	{
 		YDBLogError(@"Only a single database instance is allowed per file. "
 		            @"For concurrency you create multiple connections from a single database instance.");
@@ -439,7 +458,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	
 	if ((self = [super init]))
 	{
-		databasePath = path;
+		databaseURL = [NSURL fileURLWithPath:databasePath isDirectory:NO];
 		options = inOptions ? [inOptions copy] : [[YapDatabaseOptions alloc] init];
 		
 		__block BOOL isNewDatabaseFile = ![[NSFileManager defaultManager] fileExistsAtPath:databasePath];
@@ -451,9 +470,9 @@ static int connectionBusyHandler(void *ptr, int count) {
 			BOOL result = YES;
 			
 			if (result) result = [self openDatabase];
-#ifdef SQLITE_HAS_CODEC
-            if (result) result = [self configureEncryptionForDatabase:db];
-#endif
+		#ifdef SQLITE_HAS_CODEC
+			if (result) result = [self configureEncryptionForDatabase:db];
+		#endif
 			if (result) result = [self configureDatabase:isNewDatabaseFile];
 			if (result) result = [self createTables];
 			
@@ -500,9 +519,9 @@ static int connectionBusyHandler(void *ptr, int count) {
 					else
 					{
 						NSError *error = nil;
-						renamed = [[NSFileManager defaultManager] moveItemAtPath:databasePath
-						                                                  toPath:newDatabasePath
-						                                                   error:&error];
+						renamed = [[NSFileManager defaultManager] moveItemAtPath: databasePath
+						                                                  toPath: newDatabasePath
+						                                                   error: &error];
 						if (!renamed)
 						{
 							failed = YES;
@@ -532,7 +551,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 				// Try to delete the corrupt database file.
 				
 				NSError *error = nil;
-				BOOL deleted = [[NSFileManager defaultManager] removeItemAtPath:path error:&error];
+				BOOL deleted = [[NSFileManager defaultManager] removeItemAtPath:databasePath error:&error];
 				
 				if (deleted)
 				{
@@ -574,6 +593,33 @@ static int connectionBusyHandler(void *ptr, int count) {
 		
 		connectionDefaults = [[YapDatabaseConnectionConfig alloc] init];
 		
+		configLock = YAP_UNFAIR_LOCK_INIT;
+		
+		objectSerializers = [[NSMutableDictionary alloc] init];
+		objectDeserializers = [[NSMutableDictionary alloc] init];
+		
+		objectPreSanitizers = [[NSMutableDictionary alloc] init];
+		objectPostSanitizers = [[NSMutableDictionary alloc] init];
+		
+		metadataSerializers = [[NSMutableDictionary alloc] init];
+		metadataDeserializers = [[NSMutableDictionary alloc] init];
+		
+		metadataPreSanitizers = [[NSMutableDictionary alloc] init];
+		metadataPostSanitizers = [[NSMutableDictionary alloc] init];
+		
+		id defaultKey = [NSNull null];
+		YapDatabaseSerializer defaultSerializer = [[self class] defaultSerializer];
+		YapDatabaseDeserializer defaultDeserializer = [[self class] defaultDeserializer];
+		
+		objectSerializers[defaultKey] = defaultSerializer;
+		objectDeserializers[defaultKey] = defaultDeserializer;
+		
+		metadataSerializers[defaultKey] = defaultSerializer;
+		metadataDeserializers[defaultKey] = defaultDeserializer;
+		
+		objectPolicies = [[NSDictionary alloc] init];
+		metadataPolicies = [[NSDictionary alloc] init];
+		
 		registeredExtensions = [[NSDictionary alloc] init];
 		registeredMemoryTables = [[NSDictionary alloc] init];
 		
@@ -582,27 +628,6 @@ static int connectionBusyHandler(void *ptr, int count) {
 		
 		maxConnectionPoolCount = DEFAULT_MAX_CONNECTION_POOL_COUNT;
 		connectionPoolLifetime = DEFAULT_CONNECTION_POOL_LIFETIME;
-		
-		YapDatabaseSerializer defaultSerializer     = nil;
-		YapDatabaseDeserializer defaultDeserializer = nil;
-		
-		if (!inObjectSerializer || !inMetadataSerializer)
-			defaultSerializer = [[self class] defaultSerializer];
-		
-		if (!inObjectDeserializer || !inMetadataDeserializer)
-			defaultDeserializer = [[self class] defaultDeserializer];
-		
-		objectSerializer = (YapDatabaseSerializer)[inObjectSerializer copy] ?: defaultSerializer;
-		objectDeserializer = (YapDatabaseDeserializer)[inObjectDeserializer copy] ?: defaultDeserializer;
-		
-		metadataSerializer = (YapDatabaseSerializer)[inMetadataSerializer copy] ?: defaultSerializer;
-		metadataDeserializer = (YapDatabaseDeserializer)[inMetadataDeserializer copy] ?: defaultDeserializer;
-		
-		objectPreSanitizer = (YapDatabasePreSanitizer)[inObjectPreSanitizer copy];
-		objectPostSanitizer = (YapDatabasePostSanitizer)[inObjectPostSanitizer copy];
-		
-		metadataPreSanitizer = (YapDatabasePreSanitizer)[inMetadataPreSanitizer copy];
-		metadataPostSanitizer = (YapDatabasePostSanitizer)[inMetadataPostSanitizer copy];
 		
 		// Mark the queues so we can identify them.
 		// There are several methods whose use is restricted to within a certain queue.
@@ -626,13 +651,13 @@ static int connectionBusyHandler(void *ptr, int count) {
 
 - (void)dealloc
 {
-	YDBLogVerbose(@"Dealloc <%@ %p: databaseName=%@>", [self class], self, [databasePath lastPathComponent]);
+	YDBLogVerbose(@"Dealloc <%@ %p: databaseName=%@>", [self class], self, [databaseURL lastPathComponent]);
 	
-	NSDictionary *userInfo = @{
-		YapDatabasePathKey    : self.databasePath     ?: @"",
-		YapDatabasePathWalKey : self.databasePath_wal ?: @"",
-		YapDatabasePathShmKey : self.databasePath_shm ?: @""
-	};
+	NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithCapacity:3];
+	userInfo[YapDatabaseUrlKey]    = self.databaseURL;
+	userInfo[YapDatabaseUrlWalKey] = self.databaseURL_wal;
+	userInfo[YapDatabaseUrlShmKey] = self.databaseURL_shm;
+	
 	NSNotification *notification =
 	  [NSNotification notificationWithName:YapDatabaseClosedNotification
 	                                object:nil // Cannot retain self within dealloc method
@@ -665,7 +690,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 		yap_vfs_shim_unregister(&yap_vfs_shim);
 	}
 	
-	[YapDatabaseManager deregisterDatabaseForPath:databasePath];
+	[YapDatabaseManager deregisterDatabaseForPath:[databaseURL path]];
 	
 #if !OS_OBJECT_USE_OBJC
 	if (internalQueue)
@@ -700,7 +725,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	
 	int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_PRIVATECACHE;
     
-	int status = sqlite3_open_v2([databasePath UTF8String], &db, flags, NULL);
+	int status = sqlite3_open_v2([[databaseURL path] UTF8String], &db, flags, NULL);
 	if (status != SQLITE_OK)
 	{
 		// There are a few reasons why the database might not open.
@@ -911,6 +936,16 @@ static int connectionBusyHandler(void *ptr, int count) {
             }
         }
         
+        if (options.cipherCompatability != YapDatabaseCipherCompatability_Default) {
+            char *errorMsg;
+            NSString *pragmaCommand = [NSString stringWithFormat:@"PRAGMA cipher_compatibility = %lu", (unsigned long)options.cipherCompatability];
+            if (sqlite3_exec(sqlite, [pragmaCommand UTF8String], NULL, NULL, &errorMsg) != SQLITE_OK)
+            {
+                YDBLogError(@"failed to set database cipher_compatibility: %s", errorMsg);
+                return NO;
+            }
+        }
+        
         if (options.cipherUnencryptedHeaderLength > 0 &&
             (options.cipherKeySpecBlock ||
              options.cipherSaltBlock)) {
@@ -1056,7 +1091,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = sqlite3_prepare_v2(aDb, "SELECT sqlite_version();", -1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error creating statement! %d %s", status, sqlite3_errmsg(aDb));
 		return nil;
 	}
 	
@@ -1072,7 +1107,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	}
 	else
 	{
-		YDBLogError(@"%@: Error executing statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error executing statement! %d %s", status, sqlite3_errmsg(aDb));
 	}
 	
 	sqlite3_finalize(statement);
@@ -1091,7 +1126,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = sqlite3_prepare_v2(aDb, [pragma UTF8String], -1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error creating statement! %d %s", status, sqlite3_errmsg(aDb));
 		return NO;
 	}
 	
@@ -1104,7 +1139,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	}
 	else if (status == SQLITE_ERROR)
 	{
-		YDBLogError(@"%@: Error executing statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error executing statement! %d %s", status, sqlite3_errmsg(aDb));
 	}
 	
 	sqlite3_finalize(statement);
@@ -1148,7 +1183,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = sqlite3_prepare_v2(aDb, stmt, (int)strlen(stmt)+1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error creating statement! %d %s", status, sqlite3_errmsg(aDb));
 		return NO;
 	}
 	
@@ -1165,7 +1200,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	}
 	else if (status == SQLITE_ERROR)
 	{
-		YDBLogError(@"%@: Error executing statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error executing statement! %d %s", status, sqlite3_errmsg(aDb));
 	}
 	
 	sqlite3_finalize(statement);
@@ -1182,7 +1217,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = sqlite3_prepare_v2(aDb, stmt, (int)strlen(stmt)+1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error creating statement! %d %s", status, sqlite3_errmsg(aDb));
 		return nil;
 	}
 	
@@ -1203,7 +1238,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@: Error executing statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error executing statement! %d %s", status, sqlite3_errmsg(aDb));
 	}
 	
 	sqlite3_finalize(statement);
@@ -1225,7 +1260,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = sqlite3_prepare_v2(aDb, [pragma UTF8String], -1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error creating statement! %d %s", status, sqlite3_errmsg(aDb));
 		return nil;
 	}
 	
@@ -1248,7 +1283,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@: Error executing statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error executing statement! %d %s", status, sqlite3_errmsg(aDb));
 	}
 	
 	sqlite3_finalize(statement);
@@ -1273,7 +1308,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = sqlite3_prepare_v2(aDb, [pragma UTF8String], -1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error creating statement! %d %s", status, sqlite3_errmsg(aDb));
 		return nil;
 	}
 	
@@ -1301,7 +1336,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@: Error executing statement! %d %s", THIS_METHOD, status, sqlite3_errmsg(aDb));
+		YDBLogError(@"Error executing statement! %d %s", status, sqlite3_errmsg(aDb));
 	}
 	
 	sqlite3_finalize(statement);
@@ -1461,7 +1496,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 		if ([self respondsToSelector:sel])
 		{
 			YDBLogInfo(@"Upgrading database (%@) from version %d to %d...",
-			          [databasePath lastPathComponent], user_version, new_user_version);
+			          [databaseURL lastPathComponent], user_version, new_user_version);
 			
 			#pragma clang diagnostic push
 			#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
@@ -1472,7 +1507,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 			}
 			else
 			{
-				YDBLogError(@"Error upgrading database (%@)", [databasePath lastPathComponent]);
+				YDBLogError(@"Error upgrading database (%@)", [databaseURL lastPathComponent]);
 				break;
 			}
 		}
@@ -1516,7 +1551,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = status = sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"Error in '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+		YDBLogError(@"Error in 'BEGIN TRANSACTION' %d %s", status, sqlite3_errmsg(db));
 	}
 }
 
@@ -1525,51 +1560,50 @@ static int connectionBusyHandler(void *ptr, int count) {
 	int status = status = sqlite3_exec(db, "COMMIT TRANSACTION;", NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"Error in '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+		YDBLogError(@"Error in 'COMMIT TRANSACTION': %d %s", status, sqlite3_errmsg(db));
 	}
 }
 
 - (uint64_t)readSnapshot
 {
-    int status;
-    sqlite3_stmt *statement;
-    
-    const char *stmt = "SELECT \"data\" FROM \"yap2\" WHERE \"extension\" = ? AND \"key\" = ?;";
+	int status;
+	sqlite3_stmt *statement;
 	
-    int const column_idx_data    = SQLITE_COLUMN_START;
-    int const bind_idx_extension = SQLITE_BIND_START + 0;
-    int const bind_idx_key       = SQLITE_BIND_START + 1;
-    
-    uint64_t result = 0;
-    
-    status = sqlite3_prepare_v2(db, stmt, (int)strlen(stmt)+1, &statement, NULL);
-    if (status != SQLITE_OK)
-    {
-        YDBLogError(@"%@: Error creating statement: %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
-    }
-    else
-    {
-        const char *extension = "";
-        sqlite3_bind_text(statement, bind_idx_extension, extension, (int)strlen(extension), SQLITE_STATIC);
-        
-        const char *key = "snapshot";
-        sqlite3_bind_text(statement, bind_idx_key, key, (int)strlen(key), SQLITE_STATIC);
-        
-        status = sqlite3_step(statement);
-        if (status == SQLITE_ROW)
-        {
-            result = (uint64_t)sqlite3_column_int64(statement, column_idx_data);
-        }
-        else if (status == SQLITE_ERROR)
-        {
-            YDBLogError(@"Error executing 'readSnapshot': %d %s",
-                        status, sqlite3_errmsg(db));
-        }
-        
-        sqlite3_finalize(statement);
-    }
-    
-    return result;
+	const char *stmt = "SELECT \"data\" FROM \"yap2\" WHERE \"extension\" = ? AND \"key\" = ?;";
+	
+	int const column_idx_data    = SQLITE_COLUMN_START;
+	int const bind_idx_extension = SQLITE_BIND_START + 0;
+	int const bind_idx_key       = SQLITE_BIND_START + 1;
+	
+	uint64_t result = 0;
+	
+	status = sqlite3_prepare_v2(db, stmt, (int)strlen(stmt)+1, &statement, NULL);
+	if (status != SQLITE_OK)
+	{
+		YDBLogError(@"Error creating statement: %d %s", status, sqlite3_errmsg(db));
+	}
+	else
+	{
+		const char *extension = "";
+		sqlite3_bind_text(statement, bind_idx_extension, extension, (int)strlen(extension), SQLITE_STATIC);
+		
+		const char *key = "snapshot";
+		sqlite3_bind_text(statement, bind_idx_key, key, (int)strlen(key), SQLITE_STATIC);
+		
+		status = sqlite3_step(statement);
+		if (status == SQLITE_ROW)
+		{
+			result = (uint64_t)sqlite3_column_int64(statement, column_idx_data);
+		}
+		else if (status == SQLITE_ERROR)
+		{
+			YDBLogError(@"Error executing 'readSnapshot': %d %s", status, sqlite3_errmsg(db));
+		}
+		
+		sqlite3_finalize(statement);
+	}
+	
+	return result;
 }
 
 - (void)fetchPreviouslyRegisteredExtensionNames
@@ -1584,7 +1618,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 	status = sqlite3_prepare_v2(db, stmt, (int)strlen(stmt)+1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating statement: %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+		YDBLogError(@"Error creating statement: %d %s", status, sqlite3_errmsg(db));
 	}
 	else
 	{
@@ -1604,7 +1638,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 		
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@: Error in statement: %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error in statement: %d %s", status, sqlite3_errmsg(db));
 		}
 		
 		sqlite3_finalize(statement);
@@ -1614,7 +1648,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#pragma mark Defaults
+#pragma mark Default Configuration
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 - (YapDatabaseConnectionConfig *)connectionDefaults
@@ -1622,79 +1656,536 @@ static int connectionBusyHandler(void *ptr, int count) {
 	return connectionDefaults;
 }
 
-- (BOOL)defaultObjectCacheEnabled
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerDefaultSerializer:(YapDatabaseSerializer)serializer
 {
-	return connectionDefaults.objectCacheEnabled;
+	YAPUnfairLockLock(&configLock);
+	{
+		id key = [NSNull null];
+		objectSerializers[key] = [serializer copy];
+		metadataSerializers[key] = [serializer copy];
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultObjectCacheEnabled:(BOOL)defaultObjectCacheEnabled
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerDefaultDeserializer:(YapDatabaseDeserializer)deserializer
 {
-	connectionDefaults.objectCacheEnabled = defaultObjectCacheEnabled;
+	YAPUnfairLockLock(&configLock);
+	{
+		id key = [NSNull null];
+		objectDeserializers[key] = [deserializer copy];
+		metadataDeserializers[key] = [deserializer copy];
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (NSUInteger)defaultObjectCacheLimit
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerDefaultPreSanitizer:(nullable YapDatabasePreSanitizer)preSanitizer
 {
-	return connectionDefaults.objectCacheLimit;
+	YAPUnfairLockLock(&configLock);
+	{
+		id key = [NSNull null];
+		objectPreSanitizers[key] = [preSanitizer copy];
+		metadataPreSanitizers[key] = [preSanitizer copy];
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultObjectCacheLimit:(NSUInteger)defaultObjectCacheLimit
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerDefaultPostSanitizer:(nullable YapDatabasePostSanitizer)postSanitizer
 {
-	connectionDefaults.objectCacheLimit = defaultObjectCacheLimit;
+	YAPUnfairLockLock(&configLock);
+	{
+		id key = [NSNull null];
+		objectPostSanitizers[key] = [postSanitizer copy];
+		metadataPostSanitizers[key] = [postSanitizer copy];
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (BOOL)defaultMetadataCacheEnabled
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Per-Collection Configuration
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerSerializer:(YapDatabaseSerializer)serializer forCollection:(nullable NSString *)collection
 {
-	return connectionDefaults.metadataCacheEnabled;
+	id key = collection ?: @"";
+	id value = [serializer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectSerializers[key] = value;
+		metadataSerializers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultMetadataCacheEnabled:(BOOL)defaultMetadataCacheEnabled
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerDeserializer:(YapDatabaseDeserializer)deserializer forCollection:(nullable NSString *)collection
 {
-	connectionDefaults.metadataCacheEnabled = defaultMetadataCacheEnabled;
+	id key = collection ?: @"";
+	id value = [deserializer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectDeserializers[key] = value;
+		metadataDeserializers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (NSUInteger)defaultMetadataCacheLimit
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerPreSanitizer:(YapDatabasePreSanitizer)preSanitizer forCollection:(nullable NSString *)collection
 {
-	return connectionDefaults.metadataCacheLimit;
+	id key = collection ?: @"";
+	id value = [preSanitizer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectPreSanitizers[key] = value;
+		metadataPreSanitizers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultMetadataCacheLimit:(NSUInteger)defaultMetadataCacheLimit
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerPostSanitizer:(YapDatabasePostSanitizer)postSanitizer forCollection:(nullable NSString *)collection
 {
-	connectionDefaults.metadataCacheLimit = defaultMetadataCacheLimit;
+	id key = collection ?: @"";
+	id value = [postSanitizer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectPostSanitizers[key] = value;
+		metadataPostSanitizers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (YapDatabasePolicy)defaultObjectPolicy
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerSerializer:(nullable YapDatabaseSerializer)serializer
+              deserializer:(nullable YapDatabaseDeserializer)deserializer
+              preSanitizer:(nullable YapDatabasePreSanitizer)preSanitizer
+             postSanitizer:(nullable YapDatabasePostSanitizer)postSanitizer
+            forCollections:(NSArray<NSString*> *)collections
 {
-	return connectionDefaults.objectPolicy;
+	YAPUnfairLockLock(&configLock);
+	{
+		for (NSString *collection in collections)
+		{
+			objectSerializers[collection] = [serializer copy];
+			metadataSerializers[collection] = [serializer copy];
+			
+			objectDeserializers[collection] = [deserializer copy];
+			metadataDeserializers[collection] = [deserializer copy];
+			
+			objectPreSanitizers[collection] = [preSanitizer copy];
+			metadataPreSanitizers[collection] = [preSanitizer copy];
+			
+			objectPostSanitizers[collection] = [postSanitizer copy];
+			metadataPostSanitizers[collection] = [postSanitizer copy];
+		}
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultObjectPolicy:(YapDatabasePolicy)defaultObjectPolicy
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerObjectSerializer:(YapDatabaseSerializer)serializer forCollection:(nullable NSString *)collection
 {
-	connectionDefaults.objectPolicy = defaultObjectPolicy;
+	id key = collection ?: @"";
+	id value = [serializer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectSerializers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (YapDatabasePolicy)defaultMetadataPolicy
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerObjectDeserializer:(YapDatabaseDeserializer)deserializer forCollection:(nullable NSString *)collection
 {
-	return connectionDefaults.metadataPolicy;
+	id key = collection ?: @"";
+	id value = [deserializer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectDeserializers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultMetadataPolicy:(YapDatabasePolicy)defaultMetadataPolicy
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerObjectPreSanitizer:(YapDatabasePreSanitizer)preSanitizer forCollection:(nullable NSString *)collection
 {
-	connectionDefaults.metadataPolicy = defaultMetadataPolicy;
+	id key = collection ?: @"";
+	id value = [preSanitizer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectPreSanitizers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-#if TARGET_OS_IOS || TARGET_OS_TV
-
-- (YapDatabaseConnectionFlushMemoryFlags)defaultAutoFlushMemoryFlags
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerObjectPostSanitizer:(YapDatabasePostSanitizer)postSanitizer forCollection:(nullable NSString *)collection
 {
-	return connectionDefaults.autoFlushMemoryFlags;
+	id key = collection ?: @"";
+	id value = [postSanitizer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectPostSanitizers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-- (void)setDefaultAutoFlushMemoryFlags:(YapDatabaseConnectionFlushMemoryFlags)defaultAutoFlushMemoryFlags
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerMetadataSerializer:(YapDatabaseSerializer)serializer forCollection:(nullable NSString *)collection
 {
-	connectionDefaults.autoFlushMemoryFlags = defaultAutoFlushMemoryFlags;
+	id key = collection ?: @"";
+	id value = [serializer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		metadataSerializers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
 }
 
-#endif
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerMetadataDeserializer:(YapDatabaseDeserializer)deserializer forCollection:(nullable NSString *)collection
+{
+	id key = collection ?: @"";
+	id value = [deserializer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		metadataDeserializers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
+}
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerMetadataPreSanitizer:(YapDatabasePreSanitizer)preSanitizer forCollection:(nullable NSString *)collection
+{
+	id key = collection ?: @"";
+	id value = [preSanitizer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		metadataPreSanitizers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
+}
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)registerMetadataPostSanitizer:(YapDatabasePostSanitizer)postSanitizer forCollection:(nullable NSString *)collection
+{
+	id key = collection ?: @"";
+	id value = [postSanitizer copy];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		metadataPostSanitizers[key] = value;
+	}
+	YAPUnfairLockUnlock(&configLock);
+}
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)setObjectPolicy:(YapDatabasePolicy)policy forCollection:(nullable NSString *)collection
+{
+	id key = collection ?: @"";
+	
+	// Sanity check: ensure policy is valid enum
+	switch (policy)
+	{
+		case YapDatabasePolicyContainment : break;
+		case YapDatabasePolicyShare       : break;
+		case YapDatabasePolicyCopy        : break;
+		default                           : policy = YapDatabasePolicyContainment;
+	}
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		NSMutableDictionary *newObjectPolicies = [objectPolicies mutableCopy];
+		newObjectPolicies[key] = @(policy);
+		
+		objectPolicies = [newObjectPolicies copy];
+	}
+	YAPUnfairLockUnlock(&configLock);
+}
+
+/**
+* See header file for description.
+* Or view the api's online (for both Swift & Objective-C):
+* https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+*/
+- (void)setDefaultObjectPolicy:(YapDatabasePolicy)policy
+{
+  // Sanity check: ensure policy is valid enum
+  switch (policy)
+  {
+    case YapDatabasePolicyContainment : break;
+    case YapDatabasePolicyShare       : break;
+    case YapDatabasePolicyCopy        : break;
+    default                           : policy = YapDatabasePolicyContainment;
+  }
+
+  YAPUnfairLockLock(&configLock);
+  {
+    _defaultObjectPolicy = @(policy);
+  }
+  YAPUnfairLockUnlock(&configLock);
+}
+
+/**
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
+- (void)setMetadataPolicy:(YapDatabasePolicy)policy forCollection:(nullable NSString *)collection
+{
+	id key = collection ?: @"";
+	
+	// Sanity check: ensure policy is valid enum
+	switch (policy)
+	{
+		case YapDatabasePolicyContainment : break;
+		case YapDatabasePolicyShare       : break;
+		case YapDatabasePolicyCopy        : break;
+		default                           : policy = YapDatabasePolicyContainment;
+	}
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		NSMutableDictionary *newMetadataPolicies = [metadataPolicies mutableCopy];
+		newMetadataPolicies[key] = @(policy);
+		
+		metadataPolicies = [newMetadataPolicies copy];
+	}
+	YAPUnfairLockUnlock(&configLock);
+}
+
+/**
+* See header file for description.
+* Or view the api's online (for both Swift & Objective-C):
+* https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+*/
+- (void)setDefaultMetadataPolicy:(YapDatabasePolicy)policy
+{
+  // Sanity check: ensure policy is valid enum
+  switch (policy)
+  {
+    case YapDatabasePolicyContainment : break;
+    case YapDatabasePolicyShare       : break;
+    case YapDatabasePolicyCopy        : break;
+    default                           : policy = YapDatabasePolicyContainment;
+  }
+
+  YAPUnfairLockLock(&configLock);
+  {
+    _defaultMetadataPolicy = @(policy);
+  }
+  YAPUnfairLockUnlock(&configLock);
+}
+
+- (YapDatabaseDeserializer)objectDeserializerForCollection:(nullable NSString *)collection
+{
+	id const key = collection ?: @"";
+	id const defaultKey = [NSNull null];
+	
+	YapDatabaseDeserializer result = nil;
+	YAPUnfairLockLock(&configLock);
+	{
+		result = objectDeserializers[key] ?: objectDeserializers[defaultKey];
+	}
+	YAPUnfairLockUnlock(&configLock);
+	return result;
+}
+
+- (YapDatabaseDeserializer)metadataDeserializerForCollection:(nullable NSString *)collection
+{
+	id const key = collection ?: @"";
+	id const defaultKey = [NSNull null];
+	
+	YapDatabaseDeserializer result = nil;
+	YAPUnfairLockLock(&configLock);
+	{
+		result = metadataDeserializers[key] ?: metadataDeserializers[defaultKey];
+	}
+	YAPUnfairLockUnlock(&configLock);
+	return result;
+}
+
+
+- (YapDatabaseCollectionConfig *)configForCollection:(nullable NSString *)collection
+{
+	YapDatabaseSerializer objectSerializer = nil;
+	YapDatabaseSerializer metadataSerializer = nil;
+	
+	YapDatabasePreSanitizer objectPreSanitizer = nil;
+	YapDatabasePreSanitizer metadataPreSanitizer = nil;
+	
+	YapDatabasePostSanitizer objectPostSanitizer = nil;
+	YapDatabasePostSanitizer metadataPostSanitizer = nil;
+	
+	YapDatabasePolicy objectPolicy = YapDatabasePolicyContainment;
+	YapDatabasePolicy metadataPolicy = YapDatabasePolicyContainment;
+	
+	id const key = collection ?: @"";
+	id const defaultKey = [NSNull null];
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		objectSerializer   =   objectSerializers[key] ?:   objectSerializers[defaultKey];
+		metadataSerializer = metadataSerializers[key] ?: metadataSerializers[defaultKey];
+		
+		objectPreSanitizer   =   objectPreSanitizers[key] ?:   objectPreSanitizers[defaultKey];
+		metadataPreSanitizer = metadataPreSanitizers[key] ?: metadataPreSanitizers[defaultKey];
+		
+		objectPostSanitizer   =   objectPostSanitizers[key] ?:   objectPostSanitizers[defaultKey];
+		metadataPostSanitizer = metadataPostSanitizers[key] ?: metadataPostSanitizers[defaultKey];
+		
+		NSNumber *policy = nil;
+		
+    policy = objectPolicies[key] ?: _defaultObjectPolicy;
+		if (policy) {
+			objectPolicy = (YapDatabasePolicy)[policy integerValue];
+		}
+		
+    policy = metadataPolicies[key] ?: _defaultMetadataPolicy;
+		if (policy) {
+			metadataPolicy = (YapDatabasePolicy)[policy integerValue];
+		}
+	}
+	YAPUnfairLockUnlock(&configLock);
+	
+	YapDatabaseCollectionConfig *config =
+	  [[YapDatabaseCollectionConfig alloc] initWithObjectSerializer: objectSerializer
+	                                             metadataSerializer: metadataSerializer
+	                                             objectPreSanitizer: objectPreSanitizer
+	                                           metadataPreSanitizer: metadataPreSanitizer
+	                                            objectPostSanitizer: objectPostSanitizer
+	                                          metadataPostSanitizer: metadataPostSanitizer
+	                                                   objectPolicy: objectPolicy
+	                                                 metadataPolicy: metadataPolicy];
+	return config;
+}
+
+- (NSNumber *)getDefaultObjectPolicy
+{
+  NSNumber *result = nil;
+  YAPUnfairLockLock(&configLock);
+  {
+    result = _defaultObjectPolicy;
+  }
+  YAPUnfairLockUnlock(&configLock);
+  return result;
+}
+
+- (NSNumber *)getDefaultMetadataPolicy
+{
+  NSNumber *result = nil;
+  YAPUnfairLockLock(&configLock);
+  {
+    result = _defaultMetadataPolicy;
+  }
+  YAPUnfairLockUnlock(&configLock);
+  return result;
+}
+
+- (void)getObjectPolicies:(NSDictionary<NSString*, NSNumber*> **)objectPoliciesPtr
+         metadataPolicies:(NSDictionary<NSString*, NSNumber*> **)metadataPoliciesPtr
+{
+	NSDictionary *_objectPolicies = nil;
+	NSDictionary *_metadataPolicies = nil;
+	
+	YAPUnfairLockLock(&configLock);
+	{
+		_objectPolicies = objectPolicies;
+		_metadataPolicies = metadataPolicies;
+	}
+	YAPUnfairLockUnlock(&configLock);
+	
+	if (objectPoliciesPtr) *objectPoliciesPtr = _objectPolicies;
+	if (metadataPoliciesPtr) *metadataPoliciesPtr = _metadataPolicies;
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Connections
@@ -1728,7 +2219,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 			[connectionStates addObject:state];
 			
 			YDBLogVerbose(@"Created new connection(%p) for <%@ %p: databaseName=%@, connectionCount=%lu>",
-			              connection, [self class], self, [databasePath lastPathComponent],
+			              connection, [self class], self, [databaseURL lastPathComponent],
 			              (unsigned long)[connectionStates count]);
 			
 			// Invoke the one-time prepare method, so the connection can perform any needed initialization.
@@ -1763,7 +2254,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 		}
 		
 		YDBLogVerbose(@"Removed connection(%p) from <%@ %p: databaseName=%@, connectionCount=%lu>",
-		              connection, [self class], self, [databasePath lastPathComponent],
+		              connection, [self class], self, [databaseURL lastPathComponent],
 		              (unsigned long)[connectionStates count]);
 		
 	#pragma clang diagnostic pop
@@ -1781,8 +2272,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * This is a public method called to create a new connection.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (YapDatabaseConnection *)newConnection
 {
 	YapDatabaseConnection *connection = [[YapDatabaseConnection alloc] initWithDatabase:self];
@@ -1792,8 +2285,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * This is a public method called to create a new connection.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (YapDatabaseConnection *)newConnection:(YapDatabaseConnectionConfig *)config
 {
 	YapDatabaseConnection *connection = [[YapDatabaseConnection alloc] initWithDatabase:self config:config];
@@ -1807,59 +2302,20 @@ static int connectionBusyHandler(void *ptr, int count) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * Registers the extension with the database using the given name.
- * After registration everything works automatically using just the extension name.
- * 
- * The registration process is equivalent to a (synchronous) readwrite transaction.
- * It involves persisting various information about the extension to the database,
- * as well as possibly populating the extension by enumerating existing rows in the database.
- *
- * @param extension
- *     The YapDatabaseExtension subclass instance you wish to register.
- *     For example, this might be a YapDatabaseView instance.
- * 
- * @param extensionName
- *     This is an arbitrary string you assign to the extension.
- *     Once registered, you will generally access the extension instance via this name.
- *     For example: [[transaction ext:@"myView"] numberOfGroups];
- *
- * @return
- *     YES if the extension was properly registered.
- *     NO if an error occurred, such as the extensionName is already registered.
- * 
- * @see asyncRegisterExtension:withName:completionBlock:
- * @see asyncRegisterExtension:withName:completionQueue:completionBlock:
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (BOOL)registerExtension:(YapDatabaseExtension *)extension withName:(NSString *)extensionName
 {
 	return [self registerExtension:extension withName:extensionName config:nil];
 }
 
 /**
- * Registers the extension with the database using the given name.
- * After registration everything works automatically using just the extension name.
- *
- * The registration process is equivalent to a (synchronous) readwrite transaction.
- * It involves persisting various information about the extension to the database,
- * as well as possibly populating the extension by enumerating existing rows in the database.
- * 
- * @param extension (required)
- *     The YapDatabaseExtension subclass instance you wish to register.
- *     For example, this might be a YapDatabaseView instance.
- *
- * @param extensionName (required)
- *     This is an arbitrary string you assign to the extension.
- *     Once registered, you will generally access the extension instance via this name.
- *     For example: [[transaction ext:@"myView"] numberOfGroups];
- * 
- * @param config (optional)
- *     You may optionally pass a config for the internal databaseConnection used to perform
- *     the extension registration process. This allows you to control things such as the
- *     cache size, which is sometimes important for performance tuning.
- * 
- * @see asyncRegisterExtension:withName:completionBlock:
- * @see asyncRegisterExtension:withName:completionQueue:completionBlock:
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (BOOL)registerExtension:(YapDatabaseExtension *)extension
                  withName:(NSString *)extensionName
                    config:(YapDatabaseConnectionConfig *)config
@@ -1874,27 +2330,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Asynchronoulsy starts the extension registration process.
- * After registration everything works automatically using just the extension name.
- * 
- * The registration process is equivalent to an asyncReadwrite transaction.
- * It involves persisting various information about the extension to the database,
- * as well as possibly populating the extension by enumerating existing rows in the database.
- * 
- * @param extension (required)
- *     The YapDatabaseExtension subclass instance you wish to register.
- *     For example, this might be a YapDatabaseView instance.
- *
- * @param extensionName (required)
- *     This is an arbitrary string you assign to the extension.
- *     Once registered, you will generally access the extension instance via this name.
- *     For example: [[transaction ext:@"myView"] numberOfGroups];
- *
- * @param completionBlock (optional)
- *     An optional completion block may be used.
- *     If the extension registration was successful then the ready parameter will be YES.
- *     The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                completionBlock:(void(^)(BOOL ready))completionBlock
@@ -1907,30 +2346,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Asynchronoulsy starts the extension registration process.
- * After registration everything works automatically using just the extension name.
- *
- * The registration process is equivalent to an asyncReadwrite transaction.
- * It involves persisting various information about the extension to the database,
- * as well as possibly populating the extension by enumerating existing rows in the database.
- * 
- * @param extension (required)
- *     The YapDatabaseExtension subclass instance you wish to register.
- *     For example, this might be a YapDatabaseView instance.
- *
- * @param extensionName (required)
- *     This is an arbitrary string you assign to the extension.
- *     Once registered, you will generally access the extension instance via this name.
- *     For example: [[transaction ext:@"myView"] numberOfGroups];
- *
- * @param completionQueue (optional)
- *     The dispatch_queue to invoke the completion block may optionally be specified.
- *     If NULL, dispatch_get_main_queue() is automatically used.
- *
- * @param completionBlock (optional)
- *     An optional completion block may be used.
- *     If the extension registration was successful then the ready parameter will be YES.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                completionQueue:(dispatch_queue_t)completionQueue
@@ -1944,32 +2363,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Asynchronoulsy starts the extension registration process.
- * After registration everything works automatically using just the extension name.
- *
- * The registration process is equivalent to an asyncReadwrite transaction.
- * It involves persisting various information about the extension to the database,
- * as well as possibly populating the extension by enumerating existing rows in the database.
- * 
- * @param extension (required)
- *     The YapDatabaseExtension subclass instance you wish to register.
- *     For example, this might be a YapDatabaseView instance.
- *
- * @param extensionName (required)
- *     This is an arbitrary string you assign to the extension.
- *     Once registered, you will generally access the extension instance via this name.
- *     For example: [[transaction ext:@"myView"] numberOfGroups];
- * 
- * @param config (optional)
- *     You may optionally pass a config for the internal databaseConnection used to perform
- *     the extension registration process. This allows you to control things such as the
- *     cache size, which is sometimes important for performance tuning.
- *
- * @param completionBlock (optional)
- *     An optional completion block may be used.
- *     If the extension registration was successful then the ready parameter will be YES.
- *     The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                         config:(YapDatabaseConnectionConfig *)config
@@ -1983,35 +2380,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Asynchronoulsy starts the extension registration process.
- * After registration everything works automatically using just the extension name.
- *
- * The registration process is equivalent to an asyncReadwrite transaction.
- * It involves persisting various information about the extension to the database,
- * as well as possibly populating the extension by enumerating existing rows in the database.
- * 
- * @param extension (required)
- *     The YapDatabaseExtension subclass instance you wish to register.
- *     For example, this might be a YapDatabaseView instance.
- *
- * @param extensionName (required)
- *     This is an arbitrary string you assign to the extension.
- *     Once registered, you will generally access the extension instance via this name.
- *     For example: [[transaction ext:@"myView"] numberOfGroups];
- * 
- * @param config (optional)
- *     You may optionally pass a config for the internal databaseConnection used to perform
- *     the extension registration process. This allows you to control things such as the
- *     cache size, which is sometimes important for performance tuning.
- *
- * @param completionQueue (optional)
- *     The dispatch_queue to invoke the completion block may optionally be specified.
- *     If NULL, dispatch_get_main_queue() is automatically used.
- *
- * @param completionBlock (optional)
- *     An optional completion block may be used.
- *     If the extension registration was successful then the ready parameter will be YES.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                         config:(YapDatabaseConnectionConfig *)config
@@ -2039,36 +2411,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * This method unregisters an extension with the given name.
- * The associated underlying tables will be dropped from the database.
- * 
- * The unregistration process is equivalent to a (synchronous) readwrite transaction.
- * It involves deleting various information about the extension from the database,
- * as well as possibly dropping related tables the extension may have been using.
- *
- * @param extensionName (required)
- *     This is the arbitrary string you assigned to the extension when you registered it.
- *
- * Note 1:
- *   You don't need to re-register an extension in order to unregister it. For example,
- *   you've previously registered an extension (in previous app launches), but you no longer need the extension.
- *   You don't have to bother creating and registering the unneeded extension,
- *   just so you can unregister it and have the associated tables dropped.
- *   The database persists information about registered extensions, including the associated class of an extension.
- *   So you can simply pass the name of the extension, and the database system will use the associated class to
- *   drop the appropriate tables.
- *
- * Note 2:
- *   In fact, you don't even have to worry about unregistering extensions that you no longer need.
- *   That database system will automatically handle it for you.
- *   That is, upon completion of the first readWrite transaction (that makes changes), the database system will
- *   check to see if there are any "orphaned" extensions. That is, previously registered extensions that are
- *   no longer in use (and are now out-of-date because they didn't process the recent change(s) to the db).
- *   And it will automatically unregister these orhpaned extensions for you.
- *       
- * @see asyncUnregisterExtensionWithName:completionBlock:
- * @see asyncUnregisterExtensionWithName:completionQueue:completionBlock:
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)unregisterExtensionWithName:(NSString *)extensionName
 {
 	dispatch_sync(writeQueue, ^{ @autoreleasepool {
@@ -2078,19 +2424,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Asynchronoulsy starts the extension unregistration process.
- *
- * The unregistration process is equivalent to an asyncReadwrite transaction.
- * It involves deleting various information about the extension from the database,
- * as well as possibly dropping related tables the extension may have been using.
- *
- * @param extensionName (required)
- *     This is the arbitrary string you assigned to the extension when you registered it.
- *
- * @param completionBlock (optional)
- *     An optional completion block may be used.
- *     The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)asyncUnregisterExtensionWithName:(NSString *)extensionName
                          completionBlock:(dispatch_block_t)completionBlock
 {
@@ -2100,22 +2437,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Asynchronoulsy starts the extension unregistration process.
- *
- * The unregistration process is equivalent to an asyncReadwrite transaction.
- * It involves deleting various information about the extension from the database,
- * as well as possibly dropping related tables the extension may have been using.
- *
- * @param extensionName (required)
- *     This is the arbitrary string you assigned to the extension when you registered it.
- *
- * @param completionQueue (optional)
- *     The dispatch_queue to invoke the completion block may optionally be specified.
- *     If NULL, dispatch_get_main_queue() is automatically used.
- *
- * @param completionBlock (optional)
- *     An optional completion block may be used.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)asyncUnregisterExtensionWithName:(NSString *)extensionName
                          completionQueue:(dispatch_queue_t)completionQueue
                          completionBlock:(dispatch_block_t)completionBlock
@@ -2282,8 +2607,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Returns the registered extension with the given name.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (id)registeredExtension:(NSString *)extensionName
 {
 	// This method is public
@@ -2308,9 +2635,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Returns all currently registered extensions as a dictionary.
- * The key is the registed name (NSString), and the value is the extension (YapDatabaseExtension subclass).
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (NSDictionary *)registeredExtensions
 {
 	// This method is public
@@ -2357,19 +2685,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * Allows you to fetch the registered extension names from the last time the database was run.
- * Typically this means from the last time the app was run.
- *
- * This may be used to assist in various tasks, such as cleanup or upgrade tasks.
- *
- * If you need this information, you should fetch it early on because YapDatabase only maintains this information
- * until it sees you are done registering all your initial extensions. That is, after one initializes the database
- * they then immediately register any needed initial extensions before they begin to use the database. Once a
- * readWriteTransaction modifies the database, YapDatabase will take this opportunity to look for orphaned extensions.
- * These are extensions that were registered at the end of the last database session,
- * but which are no longer registered. YapDatabase will automatically cleanup these orphaned extensions,
- * and also clear the previouslyRegisteredExtensionNames information at this point.
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (NSArray *)previouslyRegisteredExtensionNames
 {
 	__block NSArray *result = nil;
@@ -2392,23 +2711,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 }
 
 /**
- * It's sometimes useful to find out when all async registerExtension/unregisterExtension requests have completed.
- *
- * One way to accomplish this is simply to queue an asyncReadWriteTransaction on any databaseConnection.
- * Since all async register/unregister extension requests are immediately dispatch_async'd through the
- * internal serial writeQueue, you'll know that once your asyncReadWriteTransaction is running,
- * all previously scheduled register/unregister requests have completed.
- *
- * Although the above technique works, the 'flushExtensionRequestsWithCompletionQueue::'
- * is a more efficient way to accomplish this task. (And a more elegant & readable way too.)
- *
- * @param completionQueue
- *   The dispatch_queue to invoke the completionBlock on.
- *   If NULL, dispatch_get_main_queue() is automatically used.
- *
- * @param completionBlock
- *   The block to invoke once all previously scheduled register/unregister extension requests have completed.
- **/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (void)flushExtensionRequestsWithCompletionQueue:(nullable dispatch_queue_t)completionQueue
 									       completionBlock:(nullable dispatch_block_t)completionBlock
 {
@@ -2722,27 +3028,10 @@ static int connectionBusyHandler(void *ptr, int count) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * The snapshot represents when the database was last modified by a read-write transaction.
- * This information isn persisted to the 'yap' database, and is separately held in memory.
- * It serves multiple purposes.
- *
- * First is assists in validation of a connection's cache.
- * When a connection begins a new transaction, it may have items sitting in the cache.
- * However the connection doesn't know if the items are still valid because another connection may have made changes.
- *
- * The snapshot also assists in correcting for a race condition.
- * It order to minimize blocking we allow read-write transactions to commit outside the context
- * of the snapshotQueue. This is because the commit may be a time consuming operation, and we
- * don't want to block read-only transactions during this period. The race condition occurs if a read-only
- * transactions starts in the midst of a read-write commit, and the read-only transaction gets
- * a "yap-level" snapshot that's out of sync with the "sql-level" snapshot. This is easily correctable if caught.
- * Thus we maintain the snapshot in memory, and fetchable via a select query.
- * One represents the "yap-level" snapshot, and the other represents the "sql-level" snapshot.
- *
- * The snapshot is simply a 64-bit integer.
- * It is reset when the YapDatabase instance is initialized,
- * and incremented by each read-write transaction (if changes are actually made).
-**/
+ * See header file for description.
+ * Or view the api's online (for both Swift & Objective-C):
+ * https://yapstudios.github.io/YapDatabase/Classes/YapDatabase.html
+ */
 - (uint64_t)snapshot
 {
 	if (dispatch_get_specific(IsOnSnapshotQueueKey))
@@ -3281,7 +3570,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 			status = sqlite3_prepare_v2(db, stmt, (int)strlen(stmt)+1, &statement, NULL);
 			if (status != SQLITE_OK)
 			{
-				YDBLogError(@"%@: Error creating statement: %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+				YDBLogError(@"Error creating statement: %d %s", status, sqlite3_errmsg(db));
 			}
 			else
 			{
@@ -3297,7 +3586,7 @@ static int connectionBusyHandler(void *ptr, int count) {
 				status = sqlite3_step(statement);
 				if (status != SQLITE_DONE)
 				{
-					YDBLogError(@"%@: Error in statement: %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+					YDBLogError(@"Error in statement: %d %s", status, sqlite3_errmsg(db));
 				}
 				
 				sqlite3_finalize(statement);
@@ -3429,17 +3718,13 @@ static int connectionBusyHandler(void *ptr, int count) {
 // This method is only used by tests.
 - (void)flushInternalQueue
 {
-    dispatch_sync(internalQueue,
-                  ^{
-                  });
+    dispatch_sync(internalQueue, ^{ });
 }
 
 // This method is only used by tests.
 - (void)flushCheckpointQueue
 {
-    dispatch_sync(checkpointQueue,
-                  ^{
-                  });
+    dispatch_sync(checkpointQueue, ^{ });
 }
 
 #endif

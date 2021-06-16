@@ -34,29 +34,40 @@ NS_ASSUME_NONNULL_BEGIN
  * @return NO if there was a problem with the given query. YES otherwise.
  * 
  * @see YapDatabaseQuery
-**/
+ */
 
 - (BOOL)enumerateKeysMatchingQuery:(YapDatabaseQuery *)query
-                        usingBlock:(void (NS_NOESCAPE^)(NSString *collection, NSString *key, BOOL *stop))block;
+                        usingBlock:(void (NS_NOESCAPE^)(NSString *collection, NSString *key, BOOL *stop))block
+NS_REFINED_FOR_SWIFT;
+
 
 - (BOOL)enumerateKeysAndMetadataMatchingQuery:(YapDatabaseQuery *)query
                                    usingBlock:
-                            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, __nullable id metadata, BOOL *stop))block;
+            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, __nullable id metadata, BOOL *stop))block
+NS_REFINED_FOR_SWIFT;
+
 
 - (BOOL)enumerateKeysAndObjectsMatchingQuery:(YapDatabaseQuery *)query
                                   usingBlock:
-                            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id object, BOOL *stop))block;
+                         (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id object, BOOL *stop))block
+NS_REFINED_FOR_SWIFT;
+
 
 - (BOOL)enumerateRowsMatchingQuery:(YapDatabaseQuery *)query
                         usingBlock:
-                            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id object, __nullable id metadata, BOOL *stop))block;
+       (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id object, __nullable id metadata, BOOL *stop))block
+NS_REFINED_FOR_SWIFT;
 
-- (BOOL)enumerateIndexedValuesInColumn:(NSString *)column matchingQuery:(YapDatabaseQuery *)query usingBlock:(void(NS_NOESCAPE^)(id indexedValue, BOOL *stop))block;
+
+- (BOOL)enumerateIndexedValuesInColumn:(NSString *)column
+                         matchingQuery:(YapDatabaseQuery *)query
+                            usingBlock:(void (^NS_NOESCAPE)(id indexedValue, BOOL *stop))block
+NS_REFINED_FOR_SWIFT;
 
 /**
  * Skips the enumeration process, and just gives you the count of matching rows.
-**/
-- (BOOL)getNumberOfRows:(NSUInteger *)count matchingQuery:(YapDatabaseQuery *)query;
+ */
+- (BOOL)getNumberOfRows:(NSUInteger *)count matchingQuery:(YapDatabaseQuery *)query NS_REFINED_FOR_SWIFT;
 
 /**
  * Aggregate Queries.
@@ -65,7 +76,7 @@ NS_ASSUME_NONNULL_BEGIN
  * 
  * For more inforation, see the sqlite docs on "Aggregate Functions":
  * https://www.sqlite.org/lang_aggfunc.html
-**/
+ */
 - (nullable id)performAggregateQuery:(YapDatabaseQuery *)query;
 
 /**
@@ -83,7 +94,7 @@ NS_ASSUME_NONNULL_BEGIN
  *
  * YapDatabaseQuery *query =
  *   [YapDatabaseQuery queryWithAggregateFunction:@"SUM(duration)" format:@"WHERE rowid IN (?)", rowids];
-**/
+ */
 - (NSDictionary<NSString*, NSNumber*> *)rowidsForKeys:(NSArray<NSString *> *)keys
                                          inCollection:(nullable NSString *)collection;
 

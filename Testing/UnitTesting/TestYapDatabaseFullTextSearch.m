@@ -3,9 +3,6 @@
 #import "YapDatabase.h"
 #import "YapDatabaseFullTextSearch.h"
 
-#import <CocoaLumberjack/CocoaLumberjack.h>
-#import <CocoaLumberjack/DDTTYLogger.h>
-
 
 @interface TestYapDatabaseFullTextSearch : XCTestCase
 
@@ -15,35 +12,45 @@
 
 @implementation TestYapDatabaseFullTextSearch
 
-- (NSString *)databasePath:(NSString *)suffix
+- (NSString *)fileName
 {
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-	NSString *baseDir = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
+	NSString *filePath = [NSString stringWithFormat:@"%s", __FILE__];
+	NSString *fileName = [filePath lastPathComponent];
 	
-	NSString *databaseName = [NSString stringWithFormat:@"%@-%@.sqlite", THIS_FILE, suffix];
+	NSUInteger dotLocation = [fileName rangeOfString:@"." options:NSBackwardsSearch].location;
+	if (dotLocation != NSNotFound) {
+		 fileName = [fileName substringToIndex:dotLocation];
+	}
 	
-	return [baseDir stringByAppendingPathComponent:databaseName];
+	return fileName;
+}
+
+- (NSURL *)databaseURL:(NSString *)suffix
+{
+	NSString *databaseName = [NSString stringWithFormat:@"%@-%@.sqlite", [self fileName], suffix];
+	
+	NSArray<NSURL*> *urls = [[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask];
+	NSURL *baseDir = [urls firstObject];
+	
+	return [baseDir URLByAppendingPathComponent:databaseName isDirectory:NO];
 }
 
 - (void)setUp
 {
 	[super setUp];
-	[DDLog removeAllLoggers];
-	[DDLog addLogger:[DDTTYLogger sharedInstance]];
 }
 
 - (void)tearDown
 {
-	[DDLog flushLog];
 	[super tearDown];
 }
 
 - (void)test
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database, @"Oops");
 	
@@ -159,10 +166,10 @@
 
 - (void)testSnippet
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database, @"Oops");
 	

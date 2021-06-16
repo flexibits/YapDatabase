@@ -21,19 +21,24 @@ xcuserdata
 *.moved-aside
 *.xcuserstate
 
-# Carthage
+## Carthage
 Carthage/Checkouts
 Carthage/Build
 
 ## Custom
+Docs
 LumberjackUser.h
 LumberjackUser.temp.h
+jazzy.markdown
 
 ## CocoaPods within Unit Tests
-## 
+##
 ## Excluding Xcode-desktop which is used by travis-ci
 ##
+Testing/Swift-desktop/Pods
+Testing/Xcode-desktop/Pods
 Testing/Xcode-mobile/Pods
 Testing/Xcode-tv/Pods
 Testing/Xcode-watch/Pods
 
+Signing.xcconfig

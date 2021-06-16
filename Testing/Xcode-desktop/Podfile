@@ -1,16 +1,26 @@
 project 'YapDatabaseTesting.xcodeproj'
-platform :osx, '10.12'
 
-target 'YapDatabase' do
-	pod "YapDatabase", path: '../../'
-end
+# Workaround for Xcode bug:
+# - https://www.ralfebert.de/ios/blog/cocoapods-clean-input-output-files/
+# - https://github.com/CocoaPods/CocoaPods/issues/8073
+# - https://github.com/CocoaPods/CocoaPods/pull/8105
+# 
+install! 'cocoapods', :disable_input_output_paths => true
 
-target 'YapDatabaseTests' do
-	pod "YapDatabase", path: '../../'
-end
+abstract_target 'macOS' do
+	platform :osx, '10.12'
+	use_frameworks!
 
-target 'MultiprocessApp' do
-	pod "YapDatabase", path: '../../'
+	pod "YapDatabase/Standard-ObjC", path: '../../'
+
+	target 'YapDatabase' do
+	end
+
+	target 'YapDatabaseTests' do
+	end
+
+	target 'MultiprocessApp' do
+	end
 end
 
 post_install do |installer|

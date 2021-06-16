@@ -3,13 +3,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@protocol YapActionable <NSObject>
+@protocol YapActionable
 @required
 
 /**
  * Returns an array of YapActionItem instances for the object.
  * Or nil if there are none.
-**/
+ */
 - (nullable NSArray<YapActionItem*> *)yapActionItems;
 
 @end

@@ -1,13 +1,19 @@
 #import <XCTest/XCTest.h>
-#import <CocoaLumberjack/CocoaLumberjack.h>
 #import <libkern/OSAtomic.h>
 
 #import "TestObject.h"
-#import "YapDatabase.h"
 
-#import "YapProxyObject.h"
+#import <YapDatabase/YapDatabase.h>
+#import <YapDatabase/YapProxyObject.h>
+#import <YapDatabase/YapDatabasePrivate.h>
+
+#if PODFILE_USE_FRAMEWORKS
+// Works with `use_frameworks`, but not with `use_modular_headers`
+#import <YapDatabase/YapProxyObjectPrivate.h>
+#else
+// Works with `use_modular_headers`, but not with `use_frameworks`
 #import "YapProxyObjectPrivate.h"
-
+#endif
 
 @interface TestYapDatabase : XCTestCase
 @end
@@ -32,35 +38,55 @@
 	return result;
 }
 
-- (NSString *)databasePath:(NSString *)suffix
+- (NSString *)fileName
 {
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-	NSString *baseDir = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
+	NSString *filePath = [NSString stringWithFormat:@"%s", __FILE__];
+	NSString *fileName = [filePath lastPathComponent];
 	
-	NSString *databaseName = [NSString stringWithFormat:@"%@-%@.sqlite", THIS_FILE, suffix];
+	NSUInteger dotLocation = [fileName rangeOfString:@"." options:NSBackwardsSearch].location;
+	if (dotLocation != NSNotFound) {
+		 fileName = [fileName substringToIndex:dotLocation];
+	}
 	
-	return [baseDir stringByAppendingPathComponent:databaseName];
+	return fileName;
+}
+
+- (NSURL *)databaseURL:(NSString *)suffix
+{
+	NSString *databaseName = [NSString stringWithFormat:@"%@-%@.sqlite", [self fileName], suffix];
+	
+	NSArray<NSURL*> *urls = [[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask];
+	NSURL *baseDir = [urls firstObject];
+	
+	return [baseDir URLByAppendingPathComponent:databaseName isDirectory:NO];
 }
 
 - (void)setUp
 {
 	[super setUp];
-	[DDLog removeAllLoggers];
-	[DDLog addLogger:[DDTTYLogger sharedInstance]];
 }
 
 - (void)tearDown
 {
-	[DDLog flushLog];
 	[super tearDown];
+}
+
+- (void)test0
+{
+	NSURL *databaseURL = [YapDatabase defaultDatabaseURL];
+	
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] init];
+	
+	XCTAssertNotNil(database);
 }
 
 - (void)test1
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -463,10 +489,10 @@
 
 - (void)test2
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -532,10 +558,10 @@
 
 - (void)test3
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -612,10 +638,10 @@
 
 - (void)testMutationDuringEnumerationProtection
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -842,10 +868,10 @@
 {
 #if YapDatabaseEnforcePermittedTransactions
 	
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -936,15 +962,15 @@
 	NSUInteger count = 10000;
 	
 	NSString *databaseBackupName = [NSString stringWithFormat:@"%@.backup", NSStringFromSelector(_cmd)];
-	NSString *databaseBackupPath = [self databasePath:databaseBackupName];
+	NSURL *databaseBackupURL = [self databaseURL:databaseBackupName];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databaseBackupPath error:NULL];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseBackupURL error:NULL];
 	
 	{
-		NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+		NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 		
-		[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-		YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+		[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+		YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 		
 		XCTAssertNotNil(database);
 		
@@ -960,13 +986,13 @@
 			}
 		}];
 		
-		NSError *error = [connection backupToPath:databaseBackupPath];
+		NSError *error = [connection backupToPath:[databaseBackupURL path]];
 		
 		XCTAssertNil(error, @"Error: %@", error);
 	}
 	
 	{
-		YapDatabase *backupDatabase = [[YapDatabase alloc] initWithPath:databaseBackupPath];
+		YapDatabase *backupDatabase = [[YapDatabase alloc] initWithURL:databaseBackupURL];
 		
 		XCTAssertNotNil(backupDatabase);
 		
@@ -984,14 +1010,14 @@
 	NSUInteger count = 10000;
 	
 	NSString *databaseBackupName = [NSString stringWithFormat:@"%@.backup", NSStringFromSelector(_cmd)];
-	NSString *databaseBackupPath = [self databasePath:databaseBackupName];
+	NSURL *databaseBackupURL = [self databaseURL:databaseBackupName];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databaseBackupPath error:NULL];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseBackupURL error:NULL];
 	
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -1010,14 +1036,14 @@
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 	
 	__block NSProgress *progress = nil;
-	progress = [connection asyncBackupToPath:databaseBackupPath
+	progress = [connection asyncBackupToPath:[databaseBackupURL path]
 	                         completionQueue:dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
 	                         completionBlock:^(NSError *error)
 	{
 		
 		XCTAssertNil(error, @"Error: %@", error);
 		
-		YapDatabase *backupDatabase = [[YapDatabase alloc] initWithPath:databaseBackupPath];
+		YapDatabase *backupDatabase = [[YapDatabase alloc] initWithURL:databaseBackupURL];
 		
 		XCTAssertNotNil(backupDatabase);
 		
@@ -1039,14 +1065,14 @@
 
 - (void)testVFS_standard
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[self _testVFS_withPath:databasePath options:nil];
+	[self _testVFS_withURL:databaseURL options:nil];
 }
 
 - (void)testVFS_memoryMappedIO
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	// When using Memory Mapped IO, sqlite uses xFetch instead of xRead.
 	// Since this is a different code path, it's worthwhile to have different test cases.
@@ -1054,10 +1080,10 @@
 	YapDatabaseOptions *options = [[YapDatabaseOptions alloc] init];
 	options.pragmaMMapSize = (1024 * 1024 * 1); // in bytes
 	
-	[self _testVFS_withPath:databasePath options:options];
+	[self _testVFS_withURL:databaseURL options:options];
 }
 
-- (void)_testVFS_withPath:(NSString *)databasePath options:(YapDatabaseOptions *)options
+- (void)_testVFS_withURL:(NSURL *)databaseURL options:(YapDatabaseOptions *)options
 {
 	// Yap uses a vfs shim in order to send a notification which is useful
 	// in detecting when sqlite has acquired its snapshot.
@@ -1075,9 +1101,9 @@
 	// acquired its sql-level snapshot. And we use a custom vfs shim in order to notify the read-only
 	// transaction of when the sql-level snapshot has been taken.
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
 	
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath options:options];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL options:options];
 	
 	XCTAssertNotNil(database);
 	
@@ -1139,10 +1165,10 @@
 {
 #ifndef NS_BLOCK_ASSERTIONS
 	
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -1174,10 +1200,10 @@
 
 - (void)testDoubleEnumeration
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	XCTAssertNotNil(database);
 	
@@ -1209,6 +1235,46 @@
 	}];
 	
 	XCTAssert(count == 4);
+}
+
+- (void)testObjectAndMetadataPolicies {
+  NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+
+  [[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+  YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+
+  XCTAssertNotNil(database);
+
+  YapDatabaseCollectionConfig *collectionConfig = [database configForCollection:@"col1"];
+  // Confirm the defaults are used
+  XCTAssert(collectionConfig.objectPolicy == YapDatabasePolicyContainment);
+  XCTAssert(collectionConfig.metadataPolicy == YapDatabasePolicyContainment);
+
+  [database setObjectPolicy:YapDatabasePolicyShare forCollection:@"col1"];
+  [database setMetadataPolicy:YapDatabasePolicyCopy forCollection:@"col1"];
+
+  collectionConfig = [database configForCollection:@"col1"];
+  // Confirm the explicit policies are used for the collection they were set for
+  XCTAssert(collectionConfig.objectPolicy == YapDatabasePolicyShare);
+  XCTAssert(collectionConfig.metadataPolicy == YapDatabasePolicyCopy);
+
+  collectionConfig = [database configForCollection:@"col2"];
+  // Confirm the defaults are used for a collection with no explicitly set policies
+  XCTAssert(collectionConfig.objectPolicy == YapDatabasePolicyContainment);
+  XCTAssert(collectionConfig.metadataPolicy == YapDatabasePolicyContainment);
+
+  [database setDefaultObjectPolicy:YapDatabasePolicyCopy];
+  [database setDefaultMetadataPolicy:YapDatabasePolicyShare];
+
+  collectionConfig = [database configForCollection:@"col1"];
+  // Confirm the explicit policies are still used for the collection with explicit policies
+  XCTAssert(collectionConfig.objectPolicy == YapDatabasePolicyShare);
+  XCTAssert(collectionConfig.metadataPolicy == YapDatabasePolicyCopy);
+
+  collectionConfig = [database configForCollection:@"col2"];
+  // Confirm the explicit default policies are used for a collection with no explicit policies
+  XCTAssert(collectionConfig.objectPolicy == YapDatabasePolicyCopy);
+  XCTAssert(collectionConfig.metadataPolicy == YapDatabasePolicyShare);
 }
 
 @end

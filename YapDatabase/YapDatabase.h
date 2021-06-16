@@ -1,118 +1,21 @@
 #import <Foundation/Foundation.h>
 
+#import "YapDatabaseTypes.h"
 #import "YapDatabaseOptions.h"
 #import "YapDatabaseConnection.h"
 #import "YapDatabaseTransaction.h"
 #import "YapDatabaseExtension.h"
 #import "YapDatabaseConnectionConfig.h"
 
-NS_ASSUME_NONNULL_BEGIN
+#import "YDBLogMessage.h"
 
-/**
- * Welcome to YapDatabase!
- *
- * The project page has a wealth of documentation if you have any questions.
- * https://github.com/yapstudios/YapDatabase
- *
- * If you're new to the project you may want to visit the wiki.
- * https://github.com/yapstudios/YapDatabase/wiki
- *
- * The YapDatabase class is the top level class used to initialize the database.
- * It largely represents the immutable aspects of the database such as:
- *
- * - the filepath of the sqlite file
- * - the serializer and deserializer (for turning objects into data blobs, and back into objects again)
- *
- * To access or modify the database you create one or more connections to it.
- * Connections are thread-safe, and you can spawn multiple connections in order to achieve
- * concurrent access to the database from multiple threads.
- * You can even read from the database while writing to it from another connection on another thread.
-**/
+NS_ASSUME_NONNULL_BEGIN
 
 #if defined(SQLITE_HAS_CODEC) && defined(YAP_STANDARD_SQLITE)
 
 	#error It seems you're using CocoaPods and you included YapDatabase and YapDatabase/Cipher pods. You just need to use "pod YapDatabase/SQLCipher"
 
 #endif
-
-/**
- * How does YapDatabase store my objects to disk?
- *
- * That question is answered extensively in the wiki article "Storing Objects":
- * https://github.com/yapstudios/YapDatabase/wiki/Storing-Objects
- *
- * Here's the intro from the wiki article:
- *
- * > In order to store an object to disk (via YapDatabase or any other protocol) you need some way of
- * > serializing the object. That is, convert the object into a big blob of bytes. And then, to get your
- * > object back from the disk you deserialize it (convert big blob of bytes back into object form).
- * >
- * > With YapDatabase, you can choose the default serialization/deserialization process,
- * > or you can customize it and use your own routines.
- *
- * In order to support adding objects to the database, serializers and deserializers are used.
- * The serializer and deserializer are just simple blocks that you can optionally configure.
- * The default serializer/deserializer uses NSCoding, so they are as simple and fast:
- *
- * defaultSerializer = ^(NSString *collection, NSString *key, id object){
- *     return [NSKeyedArchiver archivedDataWithRootObject:object];
- * };
- * defaultDeserializer = ^(NSString *collection, NSString *key, NSData *data) {
- *     return [NSKeyedUnarchiver unarchiveObjectWithData:data];
- * };
- *
- * If you use the initWithPath initializer, the default serializer/deserializer are used.
- * Thus to store objects in the database, the objects need only support the NSCoding protocol.
- * You may optionally use a custom serializer/deserializer for the objects and/or metadata.
-**/
-typedef NSData * __nonnull (^YapDatabaseSerializer)(NSString *collection, NSString *key, id object);
-typedef id __nonnull (^YapDatabaseDeserializer)(NSString *collection, NSString *key, NSData *data);
-
-/**
- * The sanitizer block allows you to enforce desired behavior of the objects you put into the database.
- *
- * If set, the sanitizer block will be run on all items being input into the database via
- * the setObject:forKey:inCollection: (and other setObject:XXX: methods).
- * 
- * You have 2 different hooks for running a sanitizer block:
- *
- * The PreSanitizer is run:
- * - Before the object is serialized
- * - Before the object is stored in the cache
- * - Before the object is passed to extensions
- * 
- * The PostSanitizer is run:
- * - After the object has been serialized
- * - After the object has been stored in the cache
- * - After the object has been passed to extensions
- *
- * The PreSanitizer is generally used validate the objects going into the database,
- * and/or to enforce immutability of those objects.
- *
- * Enforcing immutability is a topic covered in the "Object Policy" wiki article:
- * https://github.com/yapstudios/YapDatabase/wiki/Object-Policy
- *
- * The PostSanitizer is generally used to "clear flags" that are used by extensions.
- * For example, your objects might have a "changedProperties" property that tells extensions exactly
- * what properties where changed on a modified object. And the extension uses that information
- * in order to automatically sync the changes to the cloud. Thus the PostSanitizer would be used
- * to clear the "changedProperties" after the extension has processed the modified object.
- * 
- * An example of such a use for the PostSanitizer is discussed in the YapDatabaseCloudKit wiki article:
- * https://github.com/yapstudios/YapDatabase/wiki/YapDatabaseCloudKit
-**/
-typedef id __nonnull (^YapDatabasePreSanitizer)(NSString *collection, NSString *key, id obj);
-typedef void (^YapDatabasePostSanitizer)(NSString *collection, NSString *key, id obj);
-
-/**
- * These blocks allow you to run operations in response to a passive or aggressive checkpoint.
- *
- * One reason why you'd need these is to start UIApplication background tasks if a checkpoint occurs while the
- * app is running in the background on iOS. Otherwise if a checkpoint occurs in the background and takes too long
- * it can result in the system killing the app with a 0xdead110c termination reason.
- */
-typedef void (^YapDatabasePreCheckpointHandler)(BOOL aggressive);
-typedef void (^YapDatabasePostCheckpointHandler)(BOOL aggressive);
 
 /**
  * This notification is posted when a YapDatabase instance is deallocated,
@@ -145,12 +48,12 @@ typedef void (^YapDatabasePostCheckpointHandler)(BOOL aggressive);
  * }
  *
  * This notification is always posted to the main thread.
-**/
+ */
 extern NSString *const YapDatabaseClosedNotification;
 
-extern NSString *const YapDatabasePathKey;
-extern NSString *const YapDatabasePathWalKey;
-extern NSString *const YapDatabasePathShmKey;
+extern NSString *const YapDatabaseUrlKey;
+extern NSString *const YapDatabaseUrlWalKey;
+extern NSString *const YapDatabaseUrlShmKey;
 
 /**
  * This notification is posted following a readwrite transaction where the database was modified.
@@ -175,7 +78,7 @@ extern NSString *const YapDatabasePathShmKey;
  * }
  *
  * This notification is always posted to the main thread.
-**/
+ */
 extern NSString *const YapDatabaseModifiedNotification;
 
 /**
@@ -184,7 +87,7 @@ extern NSString *const YapDatabaseModifiedNotification;
  * database was modified in another process.
  *
  * This notification is always posted to the main thread.
- **/
+  */
 extern NSString *const YapDatabaseModifiedExternallyNotification;
 
 extern NSString *const YapDatabaseSnapshotKey;
@@ -200,171 +103,236 @@ extern NSString *const YapDatabaseRemovedCollectionsKey;
 extern NSString *const YapDatabaseAllKeysRemovedKey;
 extern NSString *const YapDatabaseModifiedExternallyKey;
 
-
+/**
+ * Welcome to YapDatabase!
+ *
+ * The project page has a wealth of documentation if you have any questions.
+ * https://github.com/yapstudios/YapDatabase
+ *
+ * If you're new to the project you may want to visit the wiki.
+ * https://github.com/yapstudios/YapDatabase/wiki
+ *
+ * There are 3 primary classes you'll deal with:
+ * - YapDatabase
+ * - YapDatabaseConnection
+ * - YapDatabaseTransaction
+ *
+ * YapDatabase represents the top-level class, and is used to initialize the database and customize default settings.
+ *
+ * To access or modify the database you create one or more connections to it. (YapDatabaseConnection)
+ * Connections are thread-safe, and you can spawn multiple connections in order to achieve
+ * concurrent access to the database from multiple threads. For example, you can read from the database
+ * concurrently from multiple connections. And you can even read from the database while writing to it
+ * from another connection.
+ *
+ * The process of reading or writing from the database happens via a transaction. (YapDatabaseTransaction)
+ * You create a read-only or read-write transaction from a connection.
+ * A transaction represents an atomic action within the database.
+ */
 @interface YapDatabase : NSObject
 
 /**
- * The default serializer & deserializer use NSCoding (NSKeyedArchiver & NSKeyedUnarchiver).
- * Thus any objects that support the NSCoding protocol may be used.
+ * The default database file URL.
  *
- * Many of Apple's primary data types support NSCoding out of the box.
- * It's easy to add NSCoding support to your own custom objects.
-**/
+ * - macOS : ~/Library/Application Support/{Bundle Identifier}/yapdb.sqlite
+ * - iOS   : {App Sandbox}/Application Support/yapdb.sqlite
+ */
++ (NSURL *)defaultDatabaseURL;
+
+/**
+ * The default serializer & deserializer use NSCoding (NSKeyedArchiver & NSKeyedUnarchiver).
+ * This is suitable for Objective-C, but not for Swift.
+ *
+ * **For Swift**:
+ * It's likely you'll prefer to use the Codable protocol.
+ * To do so, you simply register your Codable class for the corresponding collection:
+ * ```
+ * database.registerCodableSerialization(String.self, forCollection: "foo")
+ * database.registerCodableSerialization(MyCodableClass.self, forCollection: "bar")
+ * ```
+ *
+ * **For Objective-C**:
+ * Any objects that support the NSCoding protocol can be used.
+ * Most of Apple's primary data types support NSCoding out of the box.
+ * And it's easy to add NSCoding support to your own custom objects.
+ */
 + (YapDatabaseSerializer)defaultSerializer;
+
+/**
+ * The default serializer & deserializer use NSCoding (NSKeyedArchiver & NSKeyedUnarchiver).
+ * This is suitable for Objective-C, but not for Swift.
+ *
+ * **For Swift**:
+ * It's likely you'll prefer to use the Codable protocol.
+ * To do so, you simply register your Codable class for the corresponding collection:
+ * ```
+ * database.registerCodableSerialization(String.self, forCollection: "foo")
+ * database.registerCodableSerialization(MyCodableClass.self, forCollection: "bar")
+ * ```
+ *
+ * **For Objective-C**:
+ * Any objects that support the NSCoding protocol can be used.
+ * Most of Apple's primary data types support NSCoding out of the box.
+ * And it's easy to add NSCoding support to your own custom objects.
+ */
 + (YapDatabaseDeserializer)defaultDeserializer;
 
 /**
- * Property lists ONLY support the following: NSData, NSString, NSArray, NSDictionary, NSDate, and NSNumber.
- * Property lists are highly optimized and are used extensively by Apple.
+ * **Objective-C only**:
  *
- * Property lists make a good fit when your existing code already uses them,
+ * Property lists ONLY support the following types:
+ * - NSData
+ * - NSString
+ * - NSArray
+ * - NSDictionary
+ * - NSDate
+ * - NSNumber
+ *
+ * Although limited in functionality, property lists are highly optimized and are used extensively by Apple.
+ *
+ * Property lists may make a good fit when your existing code already uses them,
  * such as replacing NSUserDefaults with a database.
-**/
+ *
+ * **For Swift**: @see `-[YapDatabase registerSerializer:forCollection:]`
+ */
 + (YapDatabaseSerializer)propertyListSerializer;
+
+/**
+ * **Objective-C only**:
+ *
+ * Property lists ONLY support the following types:
+ * - NSData
+ * - NSString
+ * - NSArray
+ * - NSDictionary
+ * - NSDate
+ * - NSNumber
+ *
+ * Although limited in functionality, property lists are highly optimized and are used extensively by Apple.
+ *
+ * Property lists may make a good fit when your existing code already uses them,
+ * such as replacing NSUserDefaults with a database.
+ *
+ * **For Swift**: @see `-[YapDatabase registerDeserializer:forCollection:]`
+ */
 + (YapDatabaseDeserializer)propertyListDeserializer;
 
 /**
+ * **Objective-C only**:
+ *
  * A FASTER serializer & deserializer than the default, if serializing ONLY a NSDate object.
  * You may want to use timestampSerializer & timestampDeserializer if your metadata is simply an NSDate.
-**/
+ *
+ * **For Swift**: @see `-[YapDatabase registerSerializer:forCollection:]`
+ */
 + (YapDatabaseSerializer)timestampSerializer;
+
+/**
+ * **Objective-C only**:
+ *
+ * A FASTER serializer & deserializer than the default, if serializing ONLY a NSDate object.
+ * You may want to use timestampSerializer & timestampDeserializer if your metadata is simply an NSDate.
+ *
+ * **For Swift**: @see `-[YapDatabase registerDeserializer:forCollection:]`
+ */
 + (YapDatabaseDeserializer)timestampDeserializer;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Logging
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Allows you to configure a handler for log messages emitted from the framework.
+ *
+ * A custom log handler allows you to integrate framework-emitted log messages into your desired logging system.
+ *
+ * If you don't configure your own log handler, then a default handler is used, which:
+ * - only logs errors & warnings
+ * - uses os_log
+ */
++ (void)setLogHandler:(void (^)(YDBLogMessage *))logHandler;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Init
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * Opens or creates a sqlite database with the given path.
- * The defaults are used for everything.
- * 
- * In particular, the defaultSerializer and defaultDeserializer are used. (NSCoding)
- * No sanitizer is used.
- * The default options are used.
+ * Opens or creates a sqlite database with the default file URL.
  *
- * @see defaultSerializer
- * @see defaultDeserializer
- * @see YapDatabaseOptions
+ * @see [YapDatabase defaultDatabaseURL]
+ */
+- (instancetype)init;
+
+/**
+ * Opens or creates a sqlite database with the given file URL. The defaults options are used.
  *
- * Example code:
- * 
- *   NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
- *   NSString *baseDir = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
- *   NSString *databasePath = [baseDir stringByAppendingPathComponent:@"myDatabase.sqlite"];
- * 
- *   YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
-**/
-- (nullable id)initWithPath:(NSString *)path;
+ * **Swift example**:
+ * ```
+ * let documenstDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+ * let databaseURL = baseDir.appendingPathComponent("yapdb.sqlite")
+ * let database = YapDatabase(url: databaseURL)
+ * ```
+ *
+ * @param path
+ *   A fileURL that specifies where the database file should be stored.
+ */
+- (nullable instancetype)initWithURL:(NSURL *)path;
 
 /**
- * Opens or creates a sqlite database with the given path.
- * The given options are used instead of the default options.
-**/
-- (nullable id)initWithPath:(NSString *)path
-                    options:(nullable YapDatabaseOptions *)options;
-
-/**
- * Opens or creates a sqlite database with the given path.
- * The given serializer and deserializer are used for both objects and metadata.
- * No sanitizer is used.
-**/
-- (nullable id)initWithPath:(NSString *)path
-                 serializer:(nullable YapDatabaseSerializer)serializer
-               deserializer:(nullable YapDatabaseDeserializer)deserializer;
-
-/**
- * Opens or creates a sqlite database with the given path.
- * The given serializer and deserializer are used for both objects and metadata.
- * The given options are used instead of the default options.
-**/
-- (nullable id)initWithPath:(NSString *)path
-                 serializer:(nullable YapDatabaseSerializer)serializer
-               deserializer:(nullable YapDatabaseDeserializer)deserializer
-                    options:(nullable YapDatabaseOptions *)options;
-
-/**
- * Opens or creates a sqlite database with the given path.
- * The given serializer and deserializer are used for both objects and metadata.
- * The given sanitizer is used for both objects and metadata.
- * The given options are used instead of the default options.
-**/
-- (nullable id)initWithPath:(NSString *)path
-                 serializer:(nullable YapDatabaseSerializer)serializer
-               deserializer:(nullable YapDatabaseDeserializer)deserializer
-               preSanitizer:(nullable YapDatabasePreSanitizer)preSanitizer
-              postSanitizer:(nullable YapDatabasePostSanitizer)postSanitizer
-                    options:(nullable YapDatabaseOptions *)options;
-
-/**
- * Opens or creates a sqlite database with the given path.
- * The given serializers and deserializers are used.
- * No sanitizer is used.
-**/
-- (nullable id)initWithPath:(NSString *)path
-           objectSerializer:(nullable YapDatabaseSerializer)objectSerializer
-         objectDeserializer:(nullable YapDatabaseDeserializer)objectDeserializer
-         metadataSerializer:(nullable YapDatabaseSerializer)metadataSerializer
-       metadataDeserializer:(nullable YapDatabaseDeserializer)metadataDeserializer;
-
-/**
- * Opens or creates a sqlite database with the given path.
- * The given serializers and deserializers are used.
- * The given sanitizers are used.
-**/
-- (nullable id)initWithPath:(NSString *)path
-           objectSerializer:(nullable YapDatabaseSerializer)objectSerializer
-         objectDeserializer:(nullable YapDatabaseDeserializer)objectDeserializer
-         metadataSerializer:(nullable YapDatabaseSerializer)metadataSerializer
-       metadataDeserializer:(nullable YapDatabaseDeserializer)metadataDeserializer
-                    options:(nullable YapDatabaseOptions *)options;
-
-/**
- * Opens or creates a sqlite database with the given path.
- * The given serializers and deserializers are used.
- * The given sanitizers are used.
-**/
-- (nullable id)initWithPath:(NSString *)path
-           objectSerializer:(nullable YapDatabaseSerializer)objectSerializer
-         objectDeserializer:(nullable YapDatabaseDeserializer)objectDeserializer
-         metadataSerializer:(nullable YapDatabaseSerializer)metadataSerializer
-       metadataDeserializer:(nullable YapDatabaseDeserializer)metadataDeserializer
-         objectPreSanitizer:(nullable YapDatabasePreSanitizer)objectPreSanitizer
-        objectPostSanitizer:(nullable YapDatabasePostSanitizer)objectPostSanitizer
-       metadataPreSanitizer:(nullable YapDatabasePreSanitizer)metadataPreSanitizer
-      metadataPostSanitizer:(nullable YapDatabasePostSanitizer)metadataPostSanitizer
-                    options:(nullable YapDatabaseOptions *)options;
+ * Opens or creates a sqlite database with the given URL and options.
+ *
+ * This is typically used to configure encryption options for the databse.
+ */
+- (nullable instancetype)initWithURL:(NSURL *)path options:(nullable YapDatabaseOptions *)options;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Properties
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-@property (nonatomic, strong, readonly) NSString *databasePath;
-@property (nonatomic, strong, readonly) NSString *databasePath_wal;
-@property (nonatomic, strong, readonly) NSString *databasePath_shm;
+/**
+ * Returns that location of the database file.
+ *
+ * Keep in mind that sqlite actually creates 3 different files on disk:
+ * - databaseName
+ * - databaseName-wal
+ * - databaseName-shm
+ */
+@property (nonatomic, strong, readonly) NSURL *databaseURL;
 
-@property (nonatomic, copy, readonly) YapDatabaseSerializer objectSerializer;
-@property (nonatomic, copy, readonly) YapDatabaseDeserializer objectDeserializer;
+/**
+ * Returns that location of the database file.
+ *
+ * Keep in mind that sqlite actually creates 3 different files on disk:
+ * - databaseName
+ * - databaseName-wal
+ * - databaseName-shm
+ */
+@property (nonatomic, strong, readonly) NSURL *databaseURL_wal;
 
-@property (nonatomic, copy, readonly) YapDatabaseSerializer metadataSerializer;
-@property (nonatomic, copy, readonly) YapDatabaseDeserializer metadataDeserializer;
+/**
+ * Returns that location of the database file.
+ *
+ * Keep in mind that sqlite actually creates 3 different files on disk:
+ * - databaseName
+ * - databaseName-wal
+ * - databaseName-shm
+ */
+@property (nonatomic, strong, readonly) NSURL *databaseURL_shm;
 
-@property (nonatomic, copy, readonly, nullable) YapDatabasePreSanitizer objectPreSanitizer;
-@property (nonatomic, copy, readonly, nullable) YapDatabasePostSanitizer objectPostSanitizer;
-
-@property (nonatomic, copy, readonly, nullable) YapDatabasePreSanitizer metadataPreSanitizer;
-@property (nonatomic, copy, readonly, nullable) YapDatabasePostSanitizer metadataPostSanitizer;
-
-@property (nonatomic, copy, nullable) YapDatabasePreCheckpointHandler preCheckpointHandler;
-@property (nonatomic, copy, nullable) YapDatabasePostCheckpointHandler postCheckpointHandler;
-
+/**
+ * The options that were specified when the database was created.
+ *
+ * @note Modifying these values AFTER that database has been initialized has no effect.
+ */
 @property (nonatomic, copy, readonly) YapDatabaseOptions *options;
 
 /**
  * The snapshot number is the internal synchronization state primitive for the database.
+ *
  * It's generally only useful for database internals,
  * but it can sometimes come in handy for general debugging of your app.
  *
- * The snapshot is a simple 64-bit number that gets incremented upon every readwrite transaction
+ * The snapshot is a simple 64-bit number that gets incremented upon every read-write transaction
  * that makes modifications to the database. Thanks to the concurrent architecture of YapDatabase,
  * there may be multiple concurrent connections that are inspecting the database at similar times,
  * yet they are looking at slightly different "snapshots" of the database.
@@ -372,44 +340,46 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * The snapshot number may thus be inspected to determine (in a general fashion) what state the connection
  * is in compared with other connections.
  *
- * YapDatabase.snapshot = most up-to-date snapshot among all connections
- * YapDatabaseConnection.snapshot = snapshot of individual connection
+ * - `YapDatabase.snapshot` => most up-to-date snapshot among all connections
+ * - `YapDatabaseConnection.snapshot` => snapshot of individual connection
  *
  * Example:
+ * ```
+ * let database = YapDatabase(url: url)
+ * let _ = database.snapshot // returns zero
  *
- * YapDatabase *database = [[YapDatabase alloc] init...];
- * database.snapshot; // returns zero
+ * let connection1 = database.newConnection()
+ * let connection2 = database.newConnection()
  *
- * YapDatabaseConnection *connection1 = [database newConnection];
- * YapDatabaseConnection *connection2 = [database newConnection];
+ * let _ = connection1.snapshot // returns zero
+ * let _ = connection2.snapshot // returns zero
  *
- * connection1.snapshot; // returns zero
- * connection2.snapshot; // returns zero
+ * connection1.readWrite {(transaction) in
+ *    transaction.setObject(objectA, forKey:keyA, inCollection:nil)
+ * }
  *
- * [connection1 readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction){
- *     [transaction setObject:objectA forKey:keyA];
- * }];
+ * let _ = database.snapshot;    // returns 1
+ * let _ = connection1.snapshot; // returns 1
+ * let _ = connection2.snapshot; // returns 1
  *
- * database.snapshot;    // returns 1
- * connection1.snapshot; // returns 1
- * connection2.snapshot; // returns 1
+ * connection1.asyncReadWrite({ (transaction) in
+ *    transaction.setObject(objectB, forKey:keyB, inCollection:nil)
+ *    Thread.sleep(forTimeInterval: 1.0) // sleep for 1 second
  *
- * [connection1 asyncReadWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction){
- *     [transaction setObject:objectB forKey:keyB];
- *     [NSThread sleepForTimeInterval:1.0]; // sleep for 1 second
+ *    let _ = connection1.snapshot // returns 1 (we know it will turn into 2 once the transaction completes)
  *
- *     connection1.snapshot; // returns 1 (we know it will turn into 2 once the transaction completes)
- * } completion:^{
+ * }, completionBlock: {
  *
  *     connection1.snapshot; // returns 2
- * }];
+ * })
  *
- * [connection2 asyncReadWithBlock:^(YapDatabaseReadTransaction *transaction){
- *     [NSThread sleepForTimeInterval:5.0]; // sleep for 5 seconds
+ * connection2.asyncRead {(transaction) in
+ *    Thread.sleep(forTimeInterval: 5.0) // sleep for 5 seconds
  *
- *     connection2.snapshot; // returns 1. Understand why? See below.
- * }];
- *
+ *    let _ = connection2.snapshot // returns 1. Understand why? See below.
+ * }
+ * ```
+ * 
  * It's because when connection2 started its transaction, the database was in snapshot 1.
  * (Both connection1 & connection2 started an ASYNC transaction at the same time.)
  * Thus, for the duration of its transaction, the database remains in that state for connection2.
@@ -419,103 +389,179 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * In general, the snapshot is primarily for internal use.
  * However, it may come in handy for some tricky edge-case bugs.
  * (i.e. why doesn't my connection see that other commit ?)
-**/
+ */
 @property (atomic, assign, readonly) uint64_t snapshot;
 
 /**
  * Returns the version of sqlite being used.
  *
  * E.g.: SELECT sqlite_version();
-**/
+ */
 @property (atomic, readonly) NSString *sqliteVersion;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#pragma mark Defaults
+#pragma mark Default Configuration
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
  * Allows you to configure the default values for new connections.
  *
- * When you create a connection via [database newConnection], that new connection will inherit
- * its initial configuration via the default values configured for the parent database.
- * Of course, the connection may then override these default configuration values, and configure itself as needed.
+ * When you create a connection via `[YapDatabase newConnection]`, that new connection will inherit
+ * its initial configuration via these connectionDefaults. Of course, the connection may then override
+ * these default configuration values, and configure itself as needed.
  *
- * Changing the default values only affects future connections that will be created.
+ * Changing the connectionDefault values only affects future connections that will be created.
  * It does not affect connections that have already been created.
-**/
+ */
 @property (atomic, readonly) YapDatabaseConnectionConfig *connectionDefaults;
 
-/**
- * Allows you to set the default objectCacheEnabled and objectCacheLimit for all new connections.
- *
- * When you create a connection via [database newConnection], that new connection will inherit
- * its initial configuration via the default values configured for the parent database.
- * Of course, the connection may then override these default configuration values, and configure itself as needed.
- *
- * Changing the default values only affects future connections that will be created.
- * It does not affect connections that have already been created.
- *
- * The default defaultObjectCacheEnabled is YES.
- * The default defaultObjectCacheLimit is 250.
- *
- * @deprecated Use `connectionDefaults` property instead.
-**/
-@property (atomic, assign, readwrite) BOOL defaultObjectCacheEnabled __attribute((deprecated));
-@property (atomic, assign, readwrite) NSUInteger defaultObjectCacheLimit __attribute((deprecated));
+@property (nonatomic, copy, nullable) YapDatabasePreCheckpointHandler preCheckpointHandler;
+@property (nonatomic, copy, nullable) YapDatabasePostCheckpointHandler postCheckpointHandler;
 
 /**
- * Allows you to set the default metadataCacheEnabled and metadataCacheLimit for all new connections.
- *
- * When you create a connection via [database newConnection], that new connection will inherit
- * its initial configuration via the default values configured for the parent database.
- * Of course, the connection may then override these default configuration values, and configure itself as needed.
- *
- * Changing the default values only affects future connections that will be created.
- * It does not affect connections that have already been created.
- *
- * The default defaultMetadataCacheEnabled is YES.
- * The default defaultMetadataCacheLimit is 500.
- *
- * @deprecated Use `connectionDefaults` property instead.
-**/
-@property (atomic, assign, readwrite) BOOL defaultMetadataCacheEnabled __attribute((deprecated));
-@property (atomic, assign, readwrite) NSUInteger defaultMetadataCacheLimit __attribute((deprecated));
+ * Registers a default serializer (object => data),
+ * which will be used in cases where another serializer isn't configured for the collection.
+ */
+- (void)registerDefaultSerializer:(YapDatabaseSerializer)serializer;
 
 /**
- * Allows you to set the default objectPolicy and metadataPolicy for all new connections.
- * 
- * When you create a connection via [database newConnection], that new connection will inherit
- * its initial configuration via the default values configured for the parent database.
- * Of course, the connection may then override these default configuration values, and configure itself as needed.
- *
- * Changing the default values only affects future connections that will be created.
- * It does not affect connections that have already been created.
- * 
- * The default defaultObjectPolicy is YapDatabasePolicyContainment.
- * The default defaultMetadataPolicy is YapDatabasePolicyContainment.
- *
- * @deprecated Use `connectionDefaults` property instead.
-**/
-@property (atomic, assign, readwrite) YapDatabasePolicy defaultObjectPolicy __attribute((deprecated));
-@property (atomic, assign, readwrite) YapDatabasePolicy defaultMetadataPolicy __attribute((deprecated));
+ * Registers a default deserializer (data => object),
+ * which will be used in cases where another deserializer isn't configured for the collection.
+ */
+- (void)registerDefaultDeserializer:(YapDatabaseDeserializer)deserializer;
 
-#if TARGET_OS_IOS || TARGET_OS_TV
 /**
- * Allows you to set the default autoFlushMemoryFlags for all new connections.
+ * Registers a default PreSanitizer,
+ * which will be used in cases where another PreSanitizer isn't configured for the collection.
+ */
+- (void)registerDefaultPreSanitizer:(nullable YapDatabasePreSanitizer)preSanitizer;
+
+/**
+ * Registeres a default PostSanitizer,
+ * which will be used in cases where another PostSanitizer isn't configured for the collection.
+ */
+- (void)registerDefaultPostSanitizer:(nullable YapDatabasePostSanitizer)postSanitizer;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Per-Collection Configuration
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Registers a serializer (object => data) to be used for all **objects & metadata** in the given collection.
+ */
+- (void)registerSerializer:(YapDatabaseSerializer)serializer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a deserializer (data => object) to be used for all **objects & metadata** in the given collection.
+ */
+- (void)registerDeserializer:(YapDatabaseDeserializer)deserializer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a PreSanitizer to be used for all **objects & metadata** in the given collection.
+ */
+- (void)registerPreSanitizer:(YapDatabasePreSanitizer)preSanitizer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a PostSanitizer to be used for all **objects & metadata** in the given collection.
+ */
+- (void)registerPostSanitizer:(YapDatabasePostSanitizer)postSanitizer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a configuration group (for both objects & metadata) for an array of collections.
  *
- * When you create a connection via [database newConnection], that new connection will inherit
- * its initial configuration via the default values configured for the parent database.
- * Of course, the connection may then override these default configuration values, and configure itself as needed.
+ * This is equivalent to looping over the array, and invoking each individual registration method. (But faster.)
+ */
+- (void)registerSerializer:(nullable YapDatabaseSerializer)serializer
+              deserializer:(nullable YapDatabaseDeserializer)deserializer
+              preSanitizer:(nullable YapDatabasePreSanitizer)preSanitizer
+             postSanitizer:(nullable YapDatabasePostSanitizer)postSanitizer
+            forCollections:(NSArray<NSString*> *)collections;
+
+/**
+ * Registers a serializer (object => data) to be used for all objects in the given collection.
  *
- * Changing the default values only affects future connections that will be created.
- * It does not affect connections that have already been created.
- * 
- * The default defaultAutoFlushMemoryFlags is YapDatabaseConnectionFlushMemoryFlags_All.
+ * @note: Passing nil for the collection is the equivalent of passing the empty string.
+ */
+- (void)registerObjectSerializer:(YapDatabaseSerializer)serializer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a deserializer (data => object) to be used for all objects in the given collection.
  *
- * @deprecated Use `connectionDefaults` property instead.
-**/
-@property (atomic, assign, readwrite) YapDatabaseConnectionFlushMemoryFlags defaultAutoFlushMemoryFlags __attribute((deprecated));
-#endif
+ * @note: Passing nil for the collection is the equivalent of passing the empty string.
+ */
+- (void)registerObjectDeserializer:(YapDatabaseDeserializer)deserializer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a PreSanitizer to be used for all objects in the given collection.
+ */
+- (void)registerObjectPreSanitizer:(YapDatabasePreSanitizer)preSanitizer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a PostSanitizer to be used for all objects in the given collection.s
+ */
+- (void)registerObjectPostSanitizer:(YapDatabasePostSanitizer)postSanitizer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a serializer (object => data) to be used for all metadata in the given collection.
+ */
+- (void)registerMetadataSerializer:(YapDatabaseSerializer)serializer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a deserializer (data => object) to be used for all metadata in the given collection.
+ */
+- (void)registerMetadataDeserializer:(YapDatabaseDeserializer)deserializer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a PreSanitizer to be used for all metadata in the given collection.
+ */
+- (void)registerMetadataPreSanitizer:(YapDatabasePreSanitizer)preSanitizer forCollection:(nullable NSString *)collection;
+
+/**
+ * Registers a PostSanitizer to be used for all metadata in the given collection.
+ */
+- (void)registerMetadataPostSanitizer:(YapDatabasePostSanitizer)postSanitizer forCollection:(nullable NSString *)collection;
+
+/**
+ * Allows you to opt-in to various performance improvements,
+ * which is generally dependent on the object types you're storing in each collection.
+ *
+ * The Object-Policy is documented on the wiki here:
+ * https://github.com/yapstudios/YapDatabase/wiki/Object-Policy
+ */
+- (void)setObjectPolicy:(YapDatabasePolicy)policy forCollection:(nullable NSString *)collection;
+
+/**
+ * Allows you to opt-in to various performance improvements,
+ * which is generally dependent on the object types you're storing in each collection.
+ *
+ * This object policy will be used for all collections for which an explicit object
+ * policy has not been set.
+ *
+ * The Object-Policy is documented on the wiki here:
+ * https://github.com/yapstudios/YapDatabase/wiki/Object-Policy
+ */
+- (void)setDefaultObjectPolicy:(YapDatabasePolicy)policy;
+
+/**
+ * Allows you to opt-in to various performance improvements,
+ * which is generally dependent on the object types you're storing in each collection.
+ *
+ * The Object-Policy is documented on the wiki here:
+ * https://github.com/yapstudios/YapDatabase/wiki/Object-Policy
+ */
+- (void)setMetadataPolicy:(YapDatabasePolicy)policy forCollection:(nullable NSString *)collection;
+
+/**
+ * Allows you to opt-in to various performance improvements,
+ * which is generally dependent on the object types you're storing in each collection.
+ *
+ * This metadata policy will be used for all collections for which an explicit metadata
+ * policy has not been set.
+ *
+ * The Object-Policy is documented on the wiki here:
+ * https://github.com/yapstudios/YapDatabase/wiki/Object-Policy
+*/
+- (void)setDefaultMetadataPolicy:(YapDatabasePolicy)policy;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Connections
@@ -541,8 +587,34 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  *
  * You should avoid creating more connections than you need.
  * Creating a new connection everytime you need to access the database is a recipe for foolishness.
-**/
+ */
 - (YapDatabaseConnection *)newConnection;
+
+/**
+ * Creates and returns a new connection to the database.
+ * It is through this connection that you will access the database.
+ *
+ * You can create multiple connections to the database.
+ * Each invocation of this method creates and returns a new connection.
+ *
+ * Multiple connections can simultaneously read from the database.
+ * Multiple connections can simultaneously read from the database while another connection is modifying the database.
+ * For example, the main thread could be reading from the database via connection A,
+ * while a background thread is writing to the database via connection B.
+ *
+ * However, only a single connection may be writing to the database at any one time.
+ *
+ * A connection is thread-safe, and operates by serializing access to itself.
+ * Thus you can share a single connection between multiple threads.
+ * But for conncurrent access between multiple threads you must use multiple connections.
+ *
+ * You should avoid creating more connections than you need.
+ * Creating a new connection everytime you need to access the database is a recipe for foolishness.
+ *
+ * @param config
+ *   Allows you to specify the default configuration for the connection.
+ *   If nil, then `-[YapDatabase connectionDefaults]` will be used instead.
+ */
 - (YapDatabaseConnection *)newConnection:(nullable YapDatabaseConnectionConfig *)config;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -572,7 +644,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * 
  * @see asyncRegisterExtension:withName:completionBlock:
  * @see asyncRegisterExtension:withName:completionQueue:completionBlock:
-**/
+ */
 - (BOOL)registerExtension:(YapDatabaseExtension *)extension withName:(NSString *)extensionName;
 
 /**
@@ -599,7 +671,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * 
  * @see asyncRegisterExtension:withName:completionBlock:
  * @see asyncRegisterExtension:withName:completionQueue:completionBlock:
-**/
+ */
 - (BOOL)registerExtension:(YapDatabaseExtension *)extension
                  withName:(NSString *)extensionName
                    config:(nullable YapDatabaseConnectionConfig *)config;
@@ -625,10 +697,10 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  *     An optional completion block may be used.
  *     If the extension registration was successful then the ready parameter will be YES.
  *     The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
-**/
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
-					  withName:(NSString *)extensionName
-			   completionBlock:(nullable void(^)(BOOL ready))completionBlock;
+                      withName:(NSString *)extensionName
+               completionBlock:(nullable void(^)(BOOL ready))completionBlock;
 
 /**
  * Asynchronoulsy starts the extension registration process.
@@ -654,7 +726,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * @param completionBlock (optional)
  *     An optional completion block may be used.
  *     If the extension registration was successful then the ready parameter will be YES.
-**/
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                completionQueue:(nullable dispatch_queue_t)completionQueue
@@ -686,7 +758,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  *     An optional completion block may be used.
  *     If the extension registration was successful then the ready parameter will be YES.
  *     The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
-**/
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                         config:(nullable YapDatabaseConnectionConfig *)config
@@ -721,7 +793,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * @param completionBlock (optional)
  *     An optional completion block may be used.
  *     If the extension registration was successful then the ready parameter will be YES.
-**/
+ */
 - (void)asyncRegisterExtension:(YapDatabaseExtension *)extension
                       withName:(NSString *)extensionName
                         config:(nullable YapDatabaseConnectionConfig *)config
@@ -758,7 +830,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  *       
  * @see asyncUnregisterExtensionWithName:completionBlock:
  * @see asyncUnregisterExtensionWithName:completionQueue:completionBlock:
-**/
+ */
 - (void)unregisterExtensionWithName:(NSString *)extensionName;
 
 /**
@@ -774,7 +846,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * @param completionBlock (optional)
  *     An optional completion block may be used.
  *     The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
-**/
+ */
 - (void)asyncUnregisterExtensionWithName:(NSString *)extensionName
                          completionBlock:(nullable dispatch_block_t)completionBlock;
 
@@ -794,7 +866,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  *
  * @param completionBlock (optional)
  *     An optional completion block may be used.
-**/
+ */
 - (void)asyncUnregisterExtensionWithName:(NSString *)extensionName
                          completionQueue:(nullable dispatch_queue_t)completionQueue
                          completionBlock:(nullable dispatch_block_t)completionBlock;
@@ -802,13 +874,13 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
 /**
  * Returns the registered extension with the given name.
  * The returned object will be a subclass of YapDatabaseExtension.
-**/
+ */
 - (nullable id)registeredExtension:(NSString *)extensionName;
 
 /**
  * Returns all currently registered extensions as a dictionary.
  * The key is the registed name (NSString), and the value is the extension (YapDatabaseExtension subclass).
-**/
+ */
 - (nullable NSDictionary *)registeredExtensions;
 
 /**
@@ -824,7 +896,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * These are extensions that were registered at the end of the last database session,
  * but which are no longer registered. YapDatabase will automatically cleanup these orphaned extensions,
  * and also clear the previouslyRegisteredExtensionNames information at this point.
-**/
+ */
 - (nullable NSArray<NSString *> *)previouslyRegisteredExtensionNames;
 
 /**
@@ -844,7 +916,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  *
  * @param completionBlock
  *   The block to invoke once all previously scheduled register/unregister extension requests have completed.
- **/
+  */
 - (void)flushExtensionRequestsWithCompletionQueue:(nullable dispatch_queue_t)completionQueue
 									       completionBlock:(nullable dispatch_block_t)completionBlock;
 
@@ -877,7 +949,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * 
  * See also connectionPoolLifetime,
  * which allows you to set a maximum lifetime of connections sitting around in the pool.
-**/
+ */
 @property (atomic, assign, readwrite) NSUInteger maxConnectionPoolCount;
 
 /**
@@ -895,7 +967,7 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
  * 
  * To disable the timer, set the lifetime to zero (or any non-positive value).
  * When disabled, open connections will remain in the pool indefinitely.
-**/
+ */
 @property (atomic, assign, readwrite) NSTimeInterval connectionPoolLifetime;
 
 @end

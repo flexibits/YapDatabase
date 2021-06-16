@@ -4,29 +4,13 @@
 #import <YapDatabase/YapDatabase.h>
 #import <YapDatabase/YapDatabaseAutoView.h>
 
-#import <CocoaLumberjack/CocoaLumberjack.h>
 #import "YapDatabaseLogging.h"
-
-
-static int ddLogLevel = DDLogLevelWarning;
-#pragma unused(ddLogLevel)
 
 
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication __unused *)application didFinishLaunchingWithOptions:(NSDictionary __unused *)launchOptions
 {
-	[DDLog addLogger:[DDTTYLogger sharedInstance]];
-	
-	[[DDTTYLogger sharedInstance] setColorsEnabled:YES];
-	
-#if YapDatabaseLoggingTechnique == YapDatabaseLoggingTechnique_Lumberjack
-	[[DDTTYLogger sharedInstance] setForegroundColor:[UIColor grayColor]
-	                                 backgroundColor:nil
-	                                         forFlag:YDB_LOG_FLAG_TRACE
-	                                         context:YDBLogContext];
-#endif
-	
 	double delayInSeconds;
 	dispatch_time_t popTime;
 	
@@ -58,47 +42,14 @@ static int ddLogLevel = DDLogLevelWarning;
 #pragma mark Debugging Utilities
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-- (NSURL *)appSupportFolderURL
+- (NSURL *)databaseURL:(NSString *)suffix
 {
-    static NSURL *appSupportFolderURL = nil;
-    
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        
-        NSError *error = nil;
-        NSURL *url = [[NSFileManager defaultManager] URLForDirectory:NSApplicationSupportDirectory
-                                                            inDomain:NSUserDomainMask
-                                                   appropriateForURL:nil
-                                                              create:YES
-                                                               error:&error];
-        if (!error)
-		{
-		#if !TARGET_OS_IPHONE
-		
-			url = [url URLByAppendingPathComponent:@"YapDatabaseTesting"];
-			
-		#endif
-			
-			[[NSFileManager defaultManager] createDirectoryAtURL:url
-			                         withIntermediateDirectories:YES
-			                                          attributes:nil
-			                                               error:&error];
-		}
-		
-		appSupportFolderURL = url;
-	});
-	
-	return appSupportFolderURL;
-}
-
-- (NSString *)databasePath:(NSString *)suffix
-{
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-	NSString *baseDir = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
-	
 	NSString *databaseName = [NSString stringWithFormat:@"database-%@.sqlite", suffix];
 	
-	return [baseDir stringByAppendingPathComponent:databaseName];
+	NSArray<NSURL*> *urls = [[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask];
+	NSURL *baseDir = [urls firstObject];
+	
+	return [baseDir URLByAppendingPathComponent:databaseName isDirectory:NO];
 }
 
 - (NSString *)randomLetters:(NSUInteger)length
@@ -141,15 +92,17 @@ static int ddLogLevel = DDLogLevelWarning;
 	// This will result in the logging system printing out the file size of the WAL,
 	// along with checkpoint operation information.
 	
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
-	NSLog(@"databasePath: %@", databasePath);
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	NSLog(@"databaseURL: %@", [databaseURL path]);
 	
-	NSString *databaseWalPath = [databasePath stringByAppendingString:@"-wal"];
+	NSURL *databaseURL_wal = [NSURL fileURLWithPath:[[databaseURL path] stringByAppendingString:@"-wal"]];
+	NSURL *databaseURL_shm = [NSURL fileURLWithPath:[[databaseURL path] stringByAppendingString:@"-shm"]];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:nil];
-	[[NSFileManager defaultManager] removeItemAtPath:databaseWalPath error:nil];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:nil];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL_wal error:nil];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL_shm error:nil];
 	
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	
 	dispatch_queue_t bgQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 	
@@ -215,15 +168,12 @@ static int ddLogLevel = DDLogLevelWarning;
 
 - (void)testPragmaPageSize
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
 	YapDatabaseOptions *options = [[YapDatabaseOptions alloc] init];
 	options.pragmaPageSize = 8192;
 	
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath
-	serializer:NULL
-												 deserializer:NULL
-													  options:options];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL options:options];
 	
 	NSLog(@"database.sqliteVersion = %@", database.sqliteVersion);
 	NSLog(@"database.sqlitePageSize = %ld", (long)[[database newConnection] pragmaPageSize]);
@@ -334,12 +284,12 @@ static const NSUInteger STR_LENGTH = 2000;
 {
 	NSLog(@"Starting debug...");
 	
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
-	NSLog(@"databasePath: %@", databasePath);
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	NSLog(@"databaseURL: %@", [databaseURL path]);
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:nil];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:nil];
 	
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	YapDatabaseConnection *databaseConnection = [database newConnection];
 	
 	// Fill up the database with stuff
@@ -421,11 +371,11 @@ static const NSUInteger STR_LENGTH = 2000;
 
 - (void)debugOnTheFlyViews
 {
-	NSString *databasePath = [self databasePath:NSStringFromSelector(_cmd)];
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
 	
-//	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
+//	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
 	
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databasePath];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	YapDatabaseConnection *databaseConnection = [database newConnection];
 	
 	[self printDatabaseCount:databaseConnection];

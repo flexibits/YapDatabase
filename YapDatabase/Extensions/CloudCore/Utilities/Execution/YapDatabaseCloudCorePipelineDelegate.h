@@ -1,12 +1,15 @@
 /**
  * Copyright Deusty LLC.
-**/
+ */
 
 @class YapDatabaseCloudCorePipeline;
 @class YapDatabaseCloudCoreOperation;
 
 NS_ASSUME_NONNULL_BEGIN
 
+/**
+ * Every pipeline must have a delegate, which is responsible for performing the operations in the pipeline queue. 
+ */
 @protocol YapDatabaseCloudCorePipelineDelegate
 @required
 
@@ -54,7 +57,7 @@ NS_ASSUME_NONNULL_BEGIN
  *   The number of concurrent operations is limited by:
  *   - pipeline.maxConcurrentOperationCount
  *   - the operations within the pipeline, and their corresponding dependencies
-**/
+ */
 - (void)startOperation:(YapDatabaseCloudCoreOperation *)operation forPipeline:(YapDatabaseCloudCorePipeline *)pipeline;
 
 @end

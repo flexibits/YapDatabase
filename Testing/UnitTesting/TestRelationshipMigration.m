@@ -2,8 +2,14 @@
 
 #import <YapDatabase/YapDatabase.h>
 #import <YapDatabase/YapDatabaseRelationship.h>
-#import "YapDatabaseRelationshipPrivate.h"
 
+#if PODFILE_USE_FRAMEWORKS
+// Works with `use_frameworks`, but not with `use_modular_headers`
+#import <YapDatabase/YapDatabaseRelationshipPrivate.h>
+#else
+// Works with `use_modular_headers`, but not with `use_frameworks`
+#import "YapDatabaseRelationshipPrivate.h"
+#endif
 
 @implementation TestRelationshipMigration
 
@@ -20,27 +26,30 @@
 	return appName;
 }
 
-+ (NSString *)appSupportDir
++ (NSURL *)appSupportDir
 {
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
-    NSString *basePath = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
-	
-	NSString *appSupportDir = [basePath stringByAppendingPathComponent:[self appName]];
-	
 	NSFileManager *fileManager = [NSFileManager defaultManager];
 	
-	if (![fileManager fileExistsAtPath:appSupportDir])
+	NSArray<NSURL*> *urls = [fileManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
+	NSURL *baseDir = [urls firstObject];
+	NSURL *appSupportDir = [baseDir URLByAppendingPathComponent:[self appName] isDirectory:YES];
+	
+	if (![fileManager fileExistsAtPath:[appSupportDir path]])
 	{
-		[fileManager createDirectoryAtPath:appSupportDir withIntermediateDirectories:YES attributes:nil error:nil];
+		[fileManager createDirectoryAtURL: appSupportDir
+		      withIntermediateDirectories: YES
+		                       attributes: nil
+		                            error: nil];
 	}
 	
 	return appSupportDir;
 }
 
-+ (NSString *)databaseFilePath
++ (NSURL *)databaseURL
 {
 	NSString *fileName = @"testRelationshipMigration.sqlite";
-	return [[self appSupportDir] stringByAppendingPathComponent:fileName];
+	
+	return [[self appSupportDir] URLByAppendingPathComponent:fileName isDirectory:NO];
 }
 
 + (NSString *)randomLetters:(NSUInteger)length
@@ -64,7 +73,9 @@
 + (NSString *)generateRandomFile
 {
 	NSString *fileName = [self randomLetters:16];
-	NSString *filePath = [[self appSupportDir] stringByAppendingPathComponent:fileName];
+	
+	NSString *appSupportPath = [[self appSupportDir] path];
+	NSString *filePath = [appSupportPath stringByAppendingPathComponent:fileName];
 	
 	// Create the temp file
 	[[NSFileManager defaultManager] createFileAtPath:filePath contents:nil attributes:nil];
@@ -74,12 +85,12 @@
 
 + (void)start
 {
-	NSString *databaseFilePath = [self databaseFilePath];
-	NSLog(@"databaseFilePath: %@", databaseFilePath);
+	NSURL *databaseURL = [self databaseURL];
+	NSLog(@"databaseURL: %@", [databaseURL path]);
 	
 //	[[NSFileManager defaultManager] removeItemAtPath:databaseFilePath error:NULL];
 	
-	YapDatabase *database = [[YapDatabase alloc] initWithPath:databaseFilePath];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
 	YapDatabaseConnection *connection = [database newConnection];
 	
 	NSString *rowA = @"a";

@@ -30,9 +30,9 @@
  * See YapDatabaseLogging.h for more information.
 **/
 #if DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_INFO;
+  static const int ydbLogLevel = YDBLogLevelInfo;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -245,9 +245,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		keyCache.allowedKeyClasses = [NSSet setWithObject:[NSNumber class]];
 		keyCache.allowedObjectClasses = [NSSet setWithObject:[YapCollectionKey class]];
 		
-		objectPolicy = defaults.objectPolicy;
-		metadataPolicy = defaults.metadataPolicy;
-		
 		#if YapDatabaseEnforcePermittedTransactions
 		self.permittedTransactions = YDB_AnyTransaction;
 		#endif
@@ -279,7 +276,8 @@ static int connectionBusyHandler(void *ptr, int count)
 			
 			int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_PRIVATECACHE;
 			
-			int status = sqlite3_open_v2([database.databasePath UTF8String], &db, flags,
+			const char *databasePath = [[database.databaseURL path] UTF8String];
+			int status = sqlite3_open_v2(databasePath, &db, flags,
 			                             [database->yap_vfs_shim_name UTF8String]);
 			if (status != SQLITE_OK)
 			{
@@ -409,7 +407,7 @@ static int connectionBusyHandler(void *ptr, int count)
 - (void)dealloc
 {
 	YDBLogVerbose(@"Dealloc <YapDatabaseConnection %p: databaseName=%@>",
-	              self, [database.databasePath lastPathComponent]);
+	              self, [database.databaseURL lastPathComponent]);
 	
 	dispatch_block_t block = ^{ @autoreleasepool {
 	#pragma clang diagnostic push // silence warnings: synchronous access
@@ -592,9 +590,6 @@ static int connectionBusyHandler(void *ptr, int count)
 
 @dynamic metadataCacheEnabled;
 @dynamic metadataCacheLimit;
-
-@dynamic objectPolicy;
-@dynamic metadataPolicy;
 
 #if YapDatabaseEnforcePermittedTransactions
 @synthesize permittedTransactions = _mustUseAtomicProperty_permittedTransactions;
@@ -809,96 +804,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		dispatch_async(connectionQueue, block);
 }
 
-- (YapDatabasePolicy)objectPolicy
-{
-	__block YapDatabasePolicy policy = YapDatabasePolicyContainment;
-	
-	dispatch_block_t block = ^{
-	#pragma clang diagnostic push
-	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-		
-		policy = objectPolicy;
-		
-	#pragma clang diagnostic pop
-	};
-	
-	if (dispatch_get_specific(IsOnConnectionQueueKey))
-		block();
-	else
-		dispatch_sync(connectionQueue, block);
-	
-	return policy;
-}
-
-- (void)setObjectPolicy:(YapDatabasePolicy)newObjectPolicy
-{
-	dispatch_block_t block = ^{
-	#pragma clang diagnostic push
-	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-		
-		// sanity check
-		switch (newObjectPolicy)
-		{
-			case YapDatabasePolicyContainment :
-			case YapDatabasePolicyShare       :
-			case YapDatabasePolicyCopy        : objectPolicy = newObjectPolicy; break;
-			default                           : objectPolicy = YapDatabasePolicyContainment;
-		}
-		
-	#pragma clang diagnostic pop
-	};
-	
-	if (dispatch_get_specific(IsOnConnectionQueueKey))
-		block();
-	else
-		dispatch_async(connectionQueue, block);
-}
-
-- (YapDatabasePolicy)metadataPolicy
-{
-	__block YapDatabasePolicy policy = YapDatabasePolicyContainment;
-	
-	dispatch_block_t block = ^{
-	#pragma clang diagnostic push
-	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-		
-		policy = metadataPolicy;
-		
-	#pragma clang diagnostic pop
-	};
-	
-	if (dispatch_get_specific(IsOnConnectionQueueKey))
-		block();
-	else
-		dispatch_sync(connectionQueue, block);
-	
-	return policy;
-}
-
-- (void)setMetadataPolicy:(YapDatabasePolicy)newMetadataPolicy
-{
-	dispatch_block_t block = ^{
-	#pragma clang diagnostic push
-	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-		
-		// sanity check
-		switch (newMetadataPolicy)
-		{
-			case YapDatabasePolicyContainment :
-			case YapDatabasePolicyShare       :
-			case YapDatabasePolicyCopy        : metadataPolicy = newMetadataPolicy; break;
-			default                           : metadataPolicy = YapDatabasePolicyContainment;
-		}
-		
-	#pragma clang diagnostic pop
-	};
-	
-	if (dispatch_get_specific(IsOnConnectionQueueKey))
-		block();
-	else
-		dispatch_async(connectionQueue, block);
-}
-
 - (uint64_t)snapshot
 {
 	__block uint64_t result = 0;
@@ -989,9 +894,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		config.metadataCacheEnabled = (metadataCache != nil);
 		config.metadataCacheLimit = metadataCacheLimit;
 		
-		config.objectPolicy = objectPolicy;
-		config.metadataPolicy = metadataPolicy;
-		
 	#if TARGET_OS_IOS || TARGET_OS_TV
 		config.autoFlushMemoryFlags = self.autoFlushMemoryFlags;
 	#endif
@@ -1015,9 +917,6 @@ static int connectionBusyHandler(void *ptr, int count)
 	self.metadataCacheEnabled = config.metadataCacheEnabled;
 	self.metadataCacheLimit = config.metadataCacheLimit;
 	
-	self.objectPolicy = config.objectPolicy;
-	self.metadataPolicy = config.metadataPolicy;
-	
 #if TARGET_OS_IOS || TARGET_OS_TV
 	self.autoFlushMemoryFlags = config.autoFlushMemoryFlags;
 #endif
@@ -1038,7 +937,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error in '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1056,7 +955,7 @@ static int connectionBusyHandler(void *ptr, int count)
         int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
         if (status != SQLITE_OK)
         {
-            YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+            YDBLogError(@"Error in '%s': %d %s", stmt, status, sqlite3_errmsg(db));
         }
     }
     
@@ -1074,7 +973,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1092,7 +991,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1110,7 +1009,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1128,7 +1027,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1146,7 +1045,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1164,7 +1063,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1182,7 +1081,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1200,7 +1099,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1218,7 +1117,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1236,7 +1135,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1254,7 +1153,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1272,7 +1171,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1290,7 +1189,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1308,7 +1207,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1326,7 +1225,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1344,7 +1243,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1362,7 +1261,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1381,7 +1280,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1400,7 +1299,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1418,7 +1317,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1436,7 +1335,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1454,7 +1353,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1472,7 +1371,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1490,7 +1389,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1508,7 +1407,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 	}
 	
@@ -1530,7 +1429,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1575,7 +1474,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1620,7 +1519,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1665,7 +1564,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1710,7 +1609,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1756,7 +1655,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1801,7 +1700,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1847,7 +1746,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1893,7 +1792,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -1939,7 +1838,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+			YDBLogError(@"Error creating '%s': %d %s", stmt, status, sqlite3_errmsg(db));
 		}
 		
 		return result;
@@ -4166,6 +4065,11 @@ static int connectionBusyHandler(void *ptr, int count)
 	
 	// Process normal database changeset information
 	
+	NSDictionary<NSString*, NSNumber*> *objectPolicies = nil;
+	NSDictionary<NSString*, NSNumber*> *metadataPolicies = nil;
+	
+	[database getObjectPolicies:&objectPolicies metadataPolicies:&metadataPolicies];
+	
 	NSDictionary *changeset_objectChanges   =  [changeset objectForKey:YapDatabaseObjectChangesKey];
 	NSDictionary *changeset_metadataChanges =  [changeset objectForKey:YapDatabaseMetadataChangesKey];
 	
@@ -4243,9 +4147,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
 		
-		BOOL isPolicyContainment = (objectPolicy == YapDatabasePolicyContainment);
-		BOOL isPolicyShare       = (objectPolicy == YapDatabasePolicyShare);
-		
 		[changeset_objectChanges enumerateKeysAndObjectsUsingBlock:^(id key, id newObject, BOOL __unused *stop) {
 		#pragma clang diagnostic push
 		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
@@ -4260,13 +4161,19 @@ static int connectionBusyHandler(void *ptr, int count)
 				}
 				else if (newObject != yapTouch)
 				{
-					if (isPolicyContainment) {
+					YapDatabasePolicy objectPolicy = YapDatabasePolicyContainment;
+          NSNumber *op = objectPolicies[cacheKey.collection] ?: [database getDefaultObjectPolicy];
+					if (op) {
+						objectPolicy = (YapDatabasePolicy)[op integerValue];
+					}
+					
+					if (objectPolicy == YapDatabasePolicyContainment) {
 						[objectCache removeObjectForKey:cacheKey];
 					}
-					else if (isPolicyShare) {
+					else if (objectPolicy == YapDatabasePolicyShare) {
 						[objectCache setObject:newObject forKey:cacheKey];
 					}
-					else // if (isPolicyCopy)
+					else // if (objectPolicy == YapDatabasePolicyCopy)
 					{
 						if ([newObject conformsToProtocol:@protocol(NSCopying)])
 							[objectCache setObject:[newObject copy] forKey:cacheKey];
@@ -4313,9 +4220,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
 		
-		BOOL isPolicyContainment = (objectPolicy == YapDatabasePolicyContainment);
-		BOOL isPolicyShare       = (objectPolicy == YapDatabasePolicyShare);
-		
 		for (YapCollectionKey *cacheKey in keysToUpdate)
 		{
 			id newObject = [changeset_objectChanges objectForKey:cacheKey];
@@ -4326,13 +4230,19 @@ static int connectionBusyHandler(void *ptr, int count)
 			}
 			else if (newObject != yapTouch)
 			{
-				if (isPolicyContainment) {
+				YapDatabasePolicy objectPolicy = YapDatabasePolicyContainment;
+				NSNumber *op = objectPolicies[cacheKey.collection];
+				if (op) {
+					objectPolicy = (YapDatabasePolicy)[op integerValue];
+				}
+				
+				if (objectPolicy == YapDatabasePolicyContainment) {
 					[objectCache removeObjectForKey:cacheKey];
 				}
-				else if (isPolicyShare) {
+				else if (objectPolicy == YapDatabasePolicyShare) {
 					[objectCache setObject:newObject forKey:cacheKey];
 				}
-				else // if (isPolicyCopy)
+				else // if (objectPolicy == YapDatabasePolicyCopy)
 				{
 					if ([newObject conformsToProtocol:@protocol(NSCopying)])
 						[objectCache setObject:[newObject copy] forKey:cacheKey];
@@ -4359,9 +4269,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
 		
-		BOOL isPolicyContainment = (metadataPolicy == YapDatabasePolicyContainment);
-		BOOL isPolicyShare       = (metadataPolicy == YapDatabasePolicyShare);
-		
 		[changeset_metadataChanges enumerateKeysAndObjectsUsingBlock:^(id key, id newMetadata, BOOL __unused *stop) {
 		#pragma clang diagnostic push
 		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
@@ -4376,13 +4283,19 @@ static int connectionBusyHandler(void *ptr, int count)
 				}
 				else if (newMetadata != yapTouch)
 				{
-					if (isPolicyContainment) {
+					YapDatabasePolicy metadataPolicy = YapDatabasePolicyContainment;
+					NSNumber *mp = metadataPolicies[cacheKey.collection] ?: [database getDefaultMetadataPolicy];
+					if (mp) {
+						metadataPolicy = (YapDatabasePolicy)[mp integerValue];
+					}
+					
+					if (metadataPolicy == YapDatabasePolicyContainment) {
 						[metadataCache removeObjectForKey:cacheKey];
 					}
-					else if (isPolicyShare) {
+					else if (metadataPolicy == YapDatabasePolicyShare) {
 						[metadataCache setObject:newMetadata forKey:cacheKey];
 					}
-					else // if (isPolicyCopy)
+					else // if (metadataPolicy == YapDatabasePolicyCopy)
 					{
 						if ([newMetadata conformsToProtocol:@protocol(NSCopying)])
 							[metadataCache setObject:[newMetadata copy] forKey:cacheKey];
@@ -4429,9 +4342,6 @@ static int connectionBusyHandler(void *ptr, int count)
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
 		
-		BOOL isPolicyContainment = (metadataPolicy == YapDatabasePolicyContainment);
-		BOOL isPolicyShare       = (metadataPolicy == YapDatabasePolicyShare);
-		
 		for (YapCollectionKey *cacheKey in keysToUpdate)
 		{
 			id newMetadata = [changeset_metadataChanges objectForKey:cacheKey];
@@ -4442,13 +4352,19 @@ static int connectionBusyHandler(void *ptr, int count)
 			}
 			else if (newMetadata != yapTouch)
 			{
-				if (isPolicyContainment) {
+				YapDatabasePolicy metadataPolicy = YapDatabasePolicyContainment;
+				NSNumber *mp = metadataPolicies[cacheKey.collection];
+				if (mp) {
+					metadataPolicy = (YapDatabasePolicy)[mp integerValue];
+				}
+				
+				if (metadataPolicy == YapDatabasePolicyContainment) {
 					[metadataCache removeObjectForKey:cacheKey];
 				}
-				else if (isPolicyShare) {
+				else if (metadataPolicy == YapDatabasePolicyShare) {
 					[metadataCache setObject:newMetadata forKey:cacheKey];
 				}
-				else // if (isPolicyCopy)
+				else // if (metadataPolicy == YapDatabasePolicyCopy)
 				{
 					if ([newMetadata conformsToProtocol:@protocol(NSCopying)])
 						[metadataCache setObject:[newMetadata copy] forKey:cacheKey];
@@ -4574,7 +4490,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		
@@ -4671,7 +4587,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		
@@ -4746,7 +4662,7 @@ static int connectionBusyHandler(void *ptr, int count)
 
 // Query for a change to a particular set of keys in a collection
 
-- (BOOL)hasChangeForAnyKeys:(NSSet *)keys
+- (BOOL)hasChangeForAnyKeys:(NSSet<NSString*> *)keys
                inCollection:(NSString *)collection
             inNotifications:(NSArray *)notifications
      includingObjectChanges:(BOOL)includeObjectChanges
@@ -4760,7 +4676,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		
@@ -4824,7 +4740,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	return NO;
 }
 
-- (BOOL)hasChangeForAnyKeys:(NSSet *)keys
+- (BOOL)hasChangeForAnyKeys:(NSSet<NSString*> *)keys
                inCollection:(NSString *)collection
             inNotifications:(NSArray *)notifications
 {
@@ -4835,7 +4751,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	                 metadataChanges:YES];
 }
 
-- (BOOL)hasObjectChangeForAnyKeys:(NSSet *)keys
+- (BOOL)hasObjectChangeForAnyKeys:(NSSet<NSString*> *)keys
                      inCollection:(NSString *)collection
                   inNotifications:(NSArray *)notifications
 {
@@ -4846,7 +4762,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	                 metadataChanges:NO];
 }
 
-- (BOOL)hasMetadataChangeForAnyKeys:(NSSet *)keys
+- (BOOL)hasMetadataChangeForAnyKeys:(NSSet<NSString*> *)keys
                        inCollection:(NSString *)collection
                     inNotifications:(NSArray *)notifications
 {
@@ -4879,7 +4795,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		
@@ -4917,7 +4833,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		
@@ -4963,7 +4879,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		
@@ -5041,7 +4957,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	{
 		if (![notification isKindOfClass:[NSNotification class]])
 		{
-			YDBLogWarn(@"%@ - notifications parameter contains non-NSNotification object", THIS_METHOD);
+			YDBLogWarn(@"notifications parameter contains non-NSNotification object");
 			continue;
 		}
 		

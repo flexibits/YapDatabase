@@ -13,15 +13,16 @@
 #endif
 
 #import <CommonCrypto/CommonCrypto.h>
+#import <objc/runtime.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
 #ifdef SQLITE_HAS_CODEC
 
 #if DEBUG
-static const int ydbLogLevel = YDB_LOG_LEVEL_INFO;
+  static const int ydbLogLevel = YDBLogLevelInfo;
 #else
-static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -35,48 +36,46 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 // YapAssert() and YapFail() should be used in Obj-C methods.
 // YapCAssert() and YapCFail() should be used in free functions.
 
-#define YapAssert(X)                                                                                                   \
-if (!(X)) {                                                                                                        \
-YDBLogError(@"%s Assertion failed: %s", __PRETTY_FUNCTION__, YAP_CONVERT_EXPR_TO_STRING(X));                        \
-[DDLog flushLog];                                                                                              \
-NSAssert(0, @"Assertion failed: %s", YAP_CONVERT_EXPR_TO_STRING(X));                                               \
+#define YapAssert(condition)                                                                              \
+do {                                                                                                      \
+  if (!(condition)) {                                                                                     \
+    YDBLogError(@"%s Assertion failed: %s", __PRETTY_FUNCTION__, YAP_CONVERT_EXPR_TO_STRING(condition));  \
+    NSAssert(0, @"Assertion failed: %s", YAP_CONVERT_EXPR_TO_STRING(condition));                          \
+  }                                                                                                       \
+} while (0)
+
+#define YapCAssert(condition)                                                                             \
+do {                                                                                                      \
+  if (!(condition)) {                                                                                     \
+    YDBLogError(@"%s Assertion failed: %s", __PRETTY_FUNCTION__, YAP_CONVERT_EXPR_TO_STRING(condition));  \
+    NSCAssert(0, @"Assertion failed: %s", YAP_CONVERT_EXPR_TO_STRING(condition));                         \
+  }                                                                                                       \
+} while(0)
+
+#define YapFail(message, ...)                                                      \
+{                                                                                  \
+NSString *formattedMessage = [NSString stringWithFormat:message, ##__VA_ARGS__];   \
+YDBLogError(@"%s %@", __PRETTY_FUNCTION__, formattedMessage);                      \
+NSAssert(0, formattedMessage);                                                     \
 }
 
-#define YapCAssert(X)                                                                                                  \
-if (!(X)) {                                                                                                        \
-YDBLogError(@"%s Assertion failed: %s", __PRETTY_FUNCTION__, YAP_CONVERT_EXPR_TO_STRING(X));                        \
-[DDLog flushLog];                                                                                              \
-NSCAssert(0, @"Assertion failed: %s", YAP_CONVERT_EXPR_TO_STRING(X));                                              \
+#define YapCFail(message, ...)                                                     \
+{                                                                                  \
+NSString *formattedMessage = [NSString stringWithFormat:message, ##__VA_ARGS__];   \
+YDBLogError(@"%s %@", __PRETTY_FUNCTION__, formattedMessage);                      \
+NSCAssert(0, formattedMessage);                                                    \
 }
 
-#define YapFail(message, ...)                                                                                          \
-{                                                                                                                  \
-NSString *formattedMessage = [NSString stringWithFormat:message, ##__VA_ARGS__];                               \
-YDBLogError(@"%s %@", __PRETTY_FUNCTION__, formattedMessage);                                                   \
-[DDLog flushLog];                                                                                              \
-NSAssert(0, formattedMessage);                                                                                 \
+#define YapFailNoFormat(message)                        \
+{                                                       \
+YDBLogError(@"%s %@", __PRETTY_FUNCTION__, message);    \
+NSAssert(0, message);                                   \
 }
 
-#define YapCFail(message, ...)                                                                                         \
-{                                                                                                                  \
-NSString *formattedMessage = [NSString stringWithFormat:message, ##__VA_ARGS__];                               \
-YDBLogError(@"%s %@", __PRETTY_FUNCTION__, formattedMessage);                                                   \
-[DDLog flushLog];                                                                                              \
-NSCAssert(0, formattedMessage);                                                                                \
-}
-
-#define YapFailNoFormat(message)                                                                                       \
-{                                                                                                                  \
-YDBLogError(@"%s %@", __PRETTY_FUNCTION__, message);                                                            \
-[DDLog flushLog];                                                                                              \
-NSAssert(0, message);                                                                                          \
-}
-
-#define YapCFailNoFormat(message)                                                                                      \
-{                                                                                                                  \
-YDBLogError(@"%s %@", __PRETTY_FUNCTION__, message);                                                            \
-[DDLog flushLog];                                                                                              \
-NSCAssert(0, message);                                                                                         \
+#define YapCFailNoFormat(message)                       \
+{                                                       \
+YDBLogError(@"%s %@", __PRETTY_FUNCTION__, message);    \                                                                          \
+NSCAssert(0, message);                                  \
 }
 
 #else
@@ -90,10 +89,9 @@ NSCAssert(0, message);                                                          
 
 #endif
 
-#define YapRaiseException(name, formatString, ...) \
-{ \
-    [DDLog flushLog]; \
-    [NSException raise:name format:formatString, ##__VA_ARGS__]; \
+#define YapRaiseException(name, formatString, ...)             \
+{                                                              \
+  [NSException raise:name format:formatString, ##__VA_ARGS__]; \
 }
 
 const NSUInteger kSqliteHeaderLength = 32;
