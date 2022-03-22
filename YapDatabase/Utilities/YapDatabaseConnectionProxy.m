@@ -238,8 +238,8 @@
 		__strong YapDatabaseConnectionProxy *strongSelf = weakSelf;
 		if (strongSelf == nil) return;
 		
-		NSMutableDictionary *objectBatch = nil;
-		NSMutableDictionary *metadataBatch = nil;
+		NSMutableDictionary<YapCollectionKey *, id> *objectBatch = nil;
+		NSMutableDictionary<YapCollectionKey *, id> *metadataBatch = nil;
 		[strongSelf queueBatchWithObjects:&objectBatch metadata:&metadataBatch];
 		
 		YapNull *yapnull = [YapNull null];

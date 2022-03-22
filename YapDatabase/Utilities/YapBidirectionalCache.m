@@ -463,7 +463,7 @@ const YapBidirectionalCacheCallBacks kYapBidirectionalCacheDefaultCallBacks = (Y
 				leastRecentCacheItem = newItem;
 			
 			YDBLogVerbose(@"key(%@) <- new mostRecent [%ld of %lu]",
-			              key, CFDictionaryGetCount(key_obj_dict), (unsigned long)countLimit);
+			              key, (long)CFDictionaryGetCount(key_obj_dict), (unsigned long)countLimit);
 		}
 	}
 	

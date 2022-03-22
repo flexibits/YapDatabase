@@ -128,25 +128,25 @@ static YDBLogHandler logHandler = nil;
 	YapDatabaseConnectionConfig *connectionDefaults;
 	
 	YAPUnfairLock configLock;
+
+	NSMutableDictionary<id<NSCopying>, YapDatabaseSerializer> *objectSerializers;         // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabaseDeserializer> *objectDeserializers;     // only accessible within configLock
 	
-	NSMutableDictionary<id, YapDatabaseSerializer> *objectSerializers;         // only accessible within configLock
-	NSMutableDictionary<id, YapDatabaseDeserializer> *objectDeserializers;     // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabasePreSanitizer> *objectPreSanitizers;     // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabasePostSanitizer> *objectPostSanitizers;   // only accessible within configLock
 	
-	NSMutableDictionary<id, YapDatabasePreSanitizer> *objectPreSanitizers;     // only accessible within configLock
-	NSMutableDictionary<id, YapDatabasePostSanitizer> *objectPostSanitizers;   // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabaseSerializer> *metadataSerializers;       // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabaseDeserializer> *metadataDeserializers;   // only accessible within configLock
 	
-	NSMutableDictionary<id, YapDatabaseSerializer> *metadataSerializers;       // only accessible within configLock
-	NSMutableDictionary<id, YapDatabaseDeserializer> *metadataDeserializers;   // only accessible within configLock
-	
-	NSMutableDictionary<id, YapDatabasePreSanitizer> *metadataPreSanitizers;   // only accessible within configLock
-	NSMutableDictionary<id, YapDatabasePostSanitizer> *metadataPostSanitizers; // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabasePreSanitizer> *metadataPreSanitizers;   // only accessible within configLock
+	NSMutableDictionary<id<NSCopying>, YapDatabasePostSanitizer> *metadataPostSanitizers; // only accessible within configLock
 
   NSNumber *_defaultObjectPolicy; // only accessible within configLock
 	NSDictionary<NSString*, NSNumber*> *objectPolicies;   // only accessible within configLock
   NSNumber *_defaultMetadataPolicy; // only accessible within configLock
 	NSDictionary<NSString*, NSNumber*> *metadataPolicies; // only accessible within configLock
 	
-	NSDictionary *registeredExtensions;
+	NSDictionary<NSString *, YapDatabaseExtension *> *registeredExtensions;
 	NSDictionary *registeredMemoryTables;
 	
 	NSArray *extensionsOrder;
