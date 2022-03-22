@@ -128,18 +128,24 @@ static YDBLogHandler logHandler = nil;
 	YapDatabaseConnectionConfig *connectionDefaults;
 	
 	YAPUnfairLock configLock;
+
+#if TARGET_OS_WINDOWS
+#define Key id<NSCopying>
+#else
+#define Key id
+#endif
+
+	NSMutableDictionary<Key, YapDatabaseSerializer> *objectSerializers;         // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabaseDeserializer> *objectDeserializers;     // only accessible within configLock
 	
-	NSMutableDictionary<id, YapDatabaseSerializer> *objectSerializers;         // only accessible within configLock
-	NSMutableDictionary<id, YapDatabaseDeserializer> *objectDeserializers;     // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabasePreSanitizer> *objectPreSanitizers;     // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabasePostSanitizer> *objectPostSanitizers;   // only accessible within configLock
 	
-	NSMutableDictionary<id, YapDatabasePreSanitizer> *objectPreSanitizers;     // only accessible within configLock
-	NSMutableDictionary<id, YapDatabasePostSanitizer> *objectPostSanitizers;   // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabaseSerializer> *metadataSerializers;       // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabaseDeserializer> *metadataDeserializers;   // only accessible within configLock
 	
-	NSMutableDictionary<id, YapDatabaseSerializer> *metadataSerializers;       // only accessible within configLock
-	NSMutableDictionary<id, YapDatabaseDeserializer> *metadataDeserializers;   // only accessible within configLock
-	
-	NSMutableDictionary<id, YapDatabasePreSanitizer> *metadataPreSanitizers;   // only accessible within configLock
-	NSMutableDictionary<id, YapDatabasePostSanitizer> *metadataPostSanitizers; // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabasePreSanitizer> *metadataPreSanitizers;   // only accessible within configLock
+	NSMutableDictionary<Key, YapDatabasePostSanitizer> *metadataPostSanitizers; // only accessible within configLock
 
   NSNumber *_defaultObjectPolicy; // only accessible within configLock
 	NSDictionary<NSString*, NSNumber*> *objectPolicies;   // only accessible within configLock
@@ -3170,6 +3176,9 @@ static YDBLogHandler logHandler = nil;
 	// Forward the changeset to all extensions.
 	
 	[registeredExtensions enumerateKeysAndObjectsUsingBlock:
+#if TARGET_OS_WINDOWS
+        (void (^)(id <NSCopying>, id, BOOL *))
+#endif
 	    ^(NSString *extName, YapDatabaseExtension *ext, BOOL __unused *stop)
 	{
 		[ext noteCommittedChangeset:changeset registeredName:extName];

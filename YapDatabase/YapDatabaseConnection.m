@@ -11,6 +11,9 @@
 #import "YapSet.h"
 #import "YapTouch.h"
 
+#if TARGET_OS_WINDOWS
+#import <FantasticalWindows.h>
+#endif
 #import <mach/mach_time.h>
 #import <objc/runtime.h>
 #import <stdatomic.h>
@@ -2024,7 +2027,7 @@ static int connectionBusyHandler(void *ptr, int count)
 				NSUInteger count = transaction->completionBlockStack.count;
 				for (NSUInteger i = 0; i < count; i++)
 				{
-					dispatch_queue_t stackItemQueue = transaction->completionQueueStack[i];
+					dispatch_queue_t stackItemQueue = (__bridge dispatch_queue_t)(transaction->completionQueueStack[i]);
 					dispatch_block_t stackItemBlock = transaction->completionBlockStack[i];
 					
 					dispatch_async(stackItemQueue, stackItemBlock);
@@ -2239,7 +2242,7 @@ static int connectionBusyHandler(void *ptr, int count)
 				NSUInteger count = transaction->completionBlockStack.count;
 				for (NSUInteger i = 0; i < count; i++)
 				{
-					dispatch_queue_t stackItemQueue = transaction->completionQueueStack[i];
+					dispatch_queue_t stackItemQueue = (__bridge dispatch_queue_t)(transaction->completionQueueStack[i]);
 					dispatch_block_t stackItemBlock = transaction->completionBlockStack[i];
 					
 					dispatch_async(stackItemQueue, stackItemBlock);
@@ -4468,6 +4471,9 @@ static int connectionBusyHandler(void *ptr, int count)
 	// There's no need to create any new extConnections at this point.
 		
 	[extensions enumerateKeysAndObjectsUsingBlock:
+#if TARGET_OS_WINDOWS
+            (void (^)(__strong id <NSCopying>, __strong id, BOOL *))
+#endif
 	    ^(NSString *extName, YapDatabaseExtensionConnection *extConnection, BOOL __unused *stop)
 	{
 		[extConnection noteCommittedChangeset:changeset registeredName:extName];
@@ -6034,7 +6040,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	
 	// Loop through the backup process
 	
-	BOOL cancelled = progress.cancelled;
+	BOOL cancelled = progress.isCancelled;
 	if (!cancelled)
 	{
 		while ((status = sqlite3_backup_step(backup, nPages)) == SQLITE_OK)
@@ -6047,7 +6053,7 @@ static int connectionBusyHandler(void *ptr, int count)
 				progress.totalUnitCount = pagecount;
 				progress.completedUnitCount = (pagecount - remaining);
 				
-				cancelled = progress.cancelled;
+				cancelled = progress.isCancelled;
 				if (cancelled) break;
 			}
 		}

@@ -463,8 +463,13 @@ static NSString *const ext_key_class = @"class";
 
 @interface YapDatabaseReadWriteTransaction () {
 @public
+#if TARGET_OS_WINDOWS
+    NSMutableArray *completionQueueStack;
+    NSMutableArray *completionBlockStack;
+#else
 	NSMutableArray<dispatch_queue_t> *completionQueueStack;
 	NSMutableArray<dispatch_block_t> *completionBlockStack;
+#endif
 	
 	BOOL rollback;
 	id customObjectForNotification;

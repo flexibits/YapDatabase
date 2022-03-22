@@ -243,9 +243,13 @@
 		[strongSelf queueBatchWithObjects:&objectBatch metadata:&metadataBatch];
 		
 		YapNull *yapnull = [YapNull null];
-		
+
+#if TARGET_OS_WINDOWS
+        [objectBatch enumerateKeysAndObjectsUsingBlock:(void (^)(id <NSCopying>, id, BOOL *)) ^(YapCollectionKey *ck, id object, BOOL *stop) {
+#else
 		[objectBatch enumerateKeysAndObjectsUsingBlock:^(YapCollectionKey *ck, id object, BOOL *stop) {
-			
+#endif
+
 			if (object == yapnull)
 			{
 				[transaction removeObjectForKey:ck.key inCollection:ck.collection];
@@ -266,9 +270,12 @@
 			
 			[metadataBatch removeObjectForKey:ck];
 		}];
-		
+
+#if TARGET_OS_WINDOWS
+        [metadataBatch enumerateKeysAndObjectsUsingBlock:(void (^)(id <NSCopying>, id, BOOL *)) ^(YapCollectionKey *ck, id metadata, BOOL *stop) {
+#else
 		[metadataBatch enumerateKeysAndObjectsUsingBlock:^(YapCollectionKey *ck, id metadata, BOOL *stop) {
-			
+#endif			
 			if (metadata == yapnull) {
 				[transaction replaceMetadata:nil forKey:ck.key inCollection:ck.collection];
 			}

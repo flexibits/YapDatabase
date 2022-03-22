@@ -12,7 +12,9 @@
   #import "sqlite3.h"
 #endif
 
+#if !TARGET_OS_WINDOWS
 #import <CommonCrypto/CommonCrypto.h>
+#endif
 #import <objc/runtime.h>
 
 NS_ASSUME_NONNULL_BEGIN

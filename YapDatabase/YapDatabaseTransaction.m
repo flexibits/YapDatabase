@@ -6043,7 +6043,7 @@
 	if (completionBlockStack == nil)
 		completionBlockStack = [[NSMutableArray alloc] initWithCapacity:1];
 	
-	[completionQueueStack addObject:completionQueue];
+	[completionQueueStack addObject:(__bridge id)(completionQueue)];
 	[completionBlockStack addObject:completionBlock];
 }
 
