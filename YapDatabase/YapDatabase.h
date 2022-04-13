@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import <FantasticalWindows.h>
 #import "YapDatabaseTypes.h"
 #import "YapDatabaseOptions.h"
 #import "YapDatabaseConnection.h"

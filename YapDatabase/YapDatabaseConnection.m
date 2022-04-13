@@ -11,9 +11,6 @@
 #import "YapSet.h"
 #import "YapTouch.h"
 
-#if TARGET_OS_WINDOWS
-#import <FantasticalWindows.h>
-#endif
 #import <mach/mach_time.h>
 #import <objc/runtime.h>
 #import <stdatomic.h>
