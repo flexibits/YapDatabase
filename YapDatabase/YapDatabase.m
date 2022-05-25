@@ -3176,8 +3176,8 @@ static YDBLogHandler logHandler = nil;
 	// Forward the changeset to all extensions.
 	
 	[registeredExtensions enumerateKeysAndObjectsUsingBlock:
-#if TARGET_OS_WINDOWS
-        (void (^)(id <NSCopying>, id, BOOL *))
+#if GNUSTEP
+        (GSKeysAndObjectsEnumeratorBlock)
 #endif
 	    ^(NSString *extName, YapDatabaseExtension *ext, BOOL __unused *stop)
 	{

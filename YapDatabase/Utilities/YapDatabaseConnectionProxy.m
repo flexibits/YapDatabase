@@ -244,8 +244,8 @@
 		
 		YapNull *yapnull = [YapNull null];
 
-#if TARGET_OS_WINDOWS
-        [objectBatch enumerateKeysAndObjectsUsingBlock:(void (^)(id <NSCopying>, id, BOOL *)) ^(YapCollectionKey *ck, id object, BOOL *stop) {
+#if GNUSTEP
+        [objectBatch enumerateKeysAndObjectsUsingBlock:(GSKeysAndObjectsEnumeratorBlock) ^(YapCollectionKey *ck, id object, BOOL *stop) {
 #else
 		[objectBatch enumerateKeysAndObjectsUsingBlock:^(YapCollectionKey *ck, id object, BOOL *stop) {
 #endif
@@ -271,8 +271,8 @@
 			[metadataBatch removeObjectForKey:ck];
 		}];
 
-#if TARGET_OS_WINDOWS
-        [metadataBatch enumerateKeysAndObjectsUsingBlock:(void (^)(id <NSCopying>, id, BOOL *)) ^(YapCollectionKey *ck, id metadata, BOOL *stop) {
+#if GNUSTEP
+        [metadataBatch enumerateKeysAndObjectsUsingBlock:(GSKeysAndObjectsEnumeratorBlock) ^(YapCollectionKey *ck, id metadata, BOOL *stop) {
 #else
 		[metadataBatch enumerateKeysAndObjectsUsingBlock:^(YapCollectionKey *ck, id metadata, BOOL *stop) {
 #endif			

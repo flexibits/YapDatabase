@@ -498,8 +498,12 @@ static NSString *const ext_key_version_deprecated = @"version";
 				if ([columnValue isKindOfClass:[NSNumber class]])
 				{
 					__unsafe_unretained NSNumber *number = (NSNumber *)columnValue;
-					
+
+#if GNUSTEP
+					CFNumberType numberType = CFNumberGetType((__bridge CFNumberRef)number);
+#else
 					CFNumberType numberType = CFNumberGetType((CFNumberRef)number);
+#endif
 					
 					if (numberType == kCFNumberFloat32Type ||
 						numberType == kCFNumberFloat64Type ||

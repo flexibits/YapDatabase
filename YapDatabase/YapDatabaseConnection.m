@@ -4468,8 +4468,8 @@ static int connectionBusyHandler(void *ptr, int count)
 	// There's no need to create any new extConnections at this point.
 		
 	[extensions enumerateKeysAndObjectsUsingBlock:
-#if TARGET_OS_WINDOWS
-            (void (^)(__strong id <NSCopying>, __strong id, BOOL *))
+#if GNUSTEP
+            (GSKeysAndObjectsEnumeratorBlock)
 #endif
 	    ^(NSString *extName, YapDatabaseExtensionConnection *extConnection, BOOL __unused *stop)
 	{
