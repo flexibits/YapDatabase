@@ -331,8 +331,8 @@ static const NSUInteger YapCache_Default_CountLimit = 40;
 			if (leastRecentCacheItem == nil)
 				leastRecentCacheItem = newItem;
 			
-			YDBLogVerbose(@"key(%@) <- new, new mostRecent [%lld of %lu]",
-			              key, CFDictionaryGetCount(cfdict), (unsigned long)countLimit);
+			YDBLogVerbose(@"key(%@) <- new, new mostRecent [%ld of %lu]",
+			              key, (long)CFDictionaryGetCount(cfdict), (unsigned long)countLimit);
 		}
 	}
 	
@@ -444,7 +444,7 @@ static const NSUInteger YapCache_Default_CountLimit = 40;
 - (NSString *)description
 {
 	NSMutableString *description = [NSMutableString string];
-	[description appendFormat:@"%@, count=%lld, keys=\n", NSStringFromClass([self class]), CFDictionaryGetCount(cfdict)];
+	[description appendFormat:@"%@, count=%ld, keys=\n", NSStringFromClass([self class]), (long)CFDictionaryGetCount(cfdict)];
 	
 	YapCacheItem *item = mostRecentCacheItem;
 	NSUInteger itemIndex = 0;
