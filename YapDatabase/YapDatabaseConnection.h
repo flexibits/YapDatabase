@@ -1,5 +1,9 @@
 #import <Foundation/Foundation.h>
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapCollectionKey.h>
+#else
 #import "YapCollectionKey.h"
+#endif
 
 @class YapDatabase;
 @class YapDatabaseReadTransaction;

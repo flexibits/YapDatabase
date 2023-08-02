@@ -1,7 +1,12 @@
 #import <Foundation/Foundation.h>
 
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseExtensionTransaction.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseFullTextSearchSnippetOptions.h>
+#else
 #import "YapDatabaseExtensionTransaction.h"
 #import "YapDatabaseFullTextSearchSnippetOptions.h"
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 

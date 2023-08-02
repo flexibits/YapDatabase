@@ -1,5 +1,9 @@
 #import <Foundation/Foundation.h>
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseRelationshipEdge.h>
+#else
 #import "YapDatabaseRelationshipEdge.h"
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 
