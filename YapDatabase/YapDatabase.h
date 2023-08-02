@@ -1,5 +1,15 @@
 #import <Foundation/Foundation.h>
 
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseTypes.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseOptions.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseConnection.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseTransaction.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseExtension.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseConnectionConfig.h>
+
+#import <YAP_FRAMEWORK_PREFIX/YDBLogMessage.h>
+#else
 #import "YapDatabaseTypes.h"
 #import "YapDatabaseOptions.h"
 #import "YapDatabaseConnection.h"
@@ -8,6 +18,7 @@
 #import "YapDatabaseConnectionConfig.h"
 
 #import "YDBLogMessage.h"
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 

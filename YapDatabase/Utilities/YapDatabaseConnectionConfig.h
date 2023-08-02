@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseConnection.h>
+#else
 #import "YapDatabaseConnection.h"
+#endif
 
 /**
  * Allows you to configure the default values for new connections.

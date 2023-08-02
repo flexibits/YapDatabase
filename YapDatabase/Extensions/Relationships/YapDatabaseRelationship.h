@@ -1,5 +1,14 @@
 #import <Foundation/Foundation.h>
 
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseExtension.h>
+
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseRelationshipNode.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseRelationshipEdge.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseRelationshipOptions.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseRelationshipConnection.h>
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseRelationshipTransaction.h>
+#else
 #import "YapDatabaseExtension.h"
 
 #import "YapDatabaseRelationshipNode.h"
@@ -7,6 +16,7 @@
 #import "YapDatabaseRelationshipOptions.h"
 #import "YapDatabaseRelationshipConnection.h"
 #import "YapDatabaseRelationshipTransaction.h"
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 

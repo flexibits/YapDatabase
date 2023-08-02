@@ -1,5 +1,9 @@
 #import <Foundation/Foundation.h>
+#if defined(YAP_FRAMEWORK_PREFIX)
+#import <YAP_FRAMEWORK_PREFIX/YapDatabaseExtensionConnection.h>
+#else
 #import "YapDatabaseExtensionConnection.h"
+#endif
 
 @class YapDatabaseRelationship;
 
