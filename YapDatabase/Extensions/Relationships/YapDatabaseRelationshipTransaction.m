@@ -511,7 +511,7 @@ NS_INLINE BOOL URLMatchesURL(NSURL *url1, NSURL *url2)
 		
 		NSArray<YapDatabaseRelationshipEdge *> *givenEdges = nil;
 		
-		if ([object conformsToProtocol:@protocol(YapDatabaseRelationshipNode)])
+		if ([object respondsToSelector:@selector(yapDatabaseRelationshipEdges)])
 		{
 			givenEdges = [object yapDatabaseRelationshipEdges];
 		}
@@ -4006,7 +4006,7 @@ NS_INLINE BOOL URLMatchesURL(NSURL *url1, NSURL *url2)
 	
 	NSArray<YapDatabaseRelationshipEdge *> *givenEdges = nil;
 	
-	if ([object conformsToProtocol:@protocol(YapDatabaseRelationshipNode)])
+	if ([object respondsToSelector:@selector(yapDatabaseRelationshipEdges)])
 	{
 		givenEdges = [object yapDatabaseRelationshipEdges];
 	}
@@ -4076,7 +4076,7 @@ NS_INLINE BOOL URLMatchesURL(NSURL *url1, NSURL *url2)
 	
 	NSArray<YapDatabaseRelationshipEdge *> *givenEdges = nil;
 	
-	if ([object conformsToProtocol:@protocol(YapDatabaseRelationshipNode)])
+	if ([object respondsToSelector:@selector(yapDatabaseRelationshipEdges)])
 	{
 		givenEdges = [object yapDatabaseRelationshipEdges];
 	}
@@ -4135,7 +4135,7 @@ NS_INLINE BOOL URLMatchesURL(NSURL *url1, NSURL *url2)
 	
 	NSArray<YapDatabaseRelationshipEdge *> *givenEdges = nil;
 	
-	if ([object conformsToProtocol:@protocol(YapDatabaseRelationshipNode)])
+	if ([object respondsToSelector:@selector(yapDatabaseRelationshipEdges)])
 	{
 		givenEdges = [object yapDatabaseRelationshipEdges];
 	}
