@@ -80,11 +80,6 @@ NS_SWIFT_NAME(YapDatabaseRelationshipNode_ObjC)
  * Either side is fine, just pick whichever is easier, or whichever makes more sense for your data model.
  *
  * YapDatabaseRelationship supports one-to-one, one-to-many, and even many-to-many relationships.
- * 
- * Important: This method will not be invoked unless the object implements the protocol.
- * That is, the object's class declaration must have YapDatabaseRelationshipNode in its listed protocols.
- *
- * ... MyObject : NSObject <YapDatabaseRelationshipNode> // <-- Must be in protocol list
  *
  * @see YapDatabaseRelationshipEdge
  */
