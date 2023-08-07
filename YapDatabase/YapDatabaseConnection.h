@@ -374,7 +374,7 @@ typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags) {
  *
  * This method is asynchronous.
  */
-- (void)asyncReadWithBlock:(void (^)(YapDatabaseReadTransaction *transaction))block;
+- (void)asyncReadWithBlock:(void (^)(YapDatabaseReadTransaction *transaction))block NS_SWIFT_DISABLE_ASYNC;
 
 /**
  * Read-only access to the database.
@@ -388,7 +388,7 @@ typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags) {
  * The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
  */
 - (void)asyncReadWithBlock:(void (^)(YapDatabaseReadTransaction *transaction))block
-           completionBlock:(nullable dispatch_block_t)completionBlock;
+           completionBlock:(nullable dispatch_block_t)completionBlock NS_SWIFT_DISABLE_ASYNC;
 
 /**
  * Read-only access to the database.
@@ -404,7 +404,7 @@ typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags) {
  */
 - (void)asyncReadWithBlock:(void (^)(YapDatabaseReadTransaction *transaction))block
            completionQueue:(nullable dispatch_queue_t)completionQueue
-           completionBlock:(nullable dispatch_block_t)completionBlock;
+           completionBlock:(nullable dispatch_block_t)completionBlock NS_SWIFT_DISABLE_ASYNC;
 
 /**
  * Read-write access to the database.
@@ -414,7 +414,7 @@ typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags) {
  * 
  * This method is asynchronous.
  */
-- (void)asyncReadWriteWithBlock:(void (^)(YapDatabaseReadWriteTransaction *transaction))block;
+- (void)asyncReadWriteWithBlock:(void (^)(YapDatabaseReadWriteTransaction *transaction))block NS_SWIFT_DISABLE_ASYNC;
 
 /**
  * Read-write access to the database.
@@ -429,7 +429,7 @@ typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags) {
  * The completionBlock will be invoked on the main thread (dispatch_get_main_queue()).
  */
 - (void)asyncReadWriteWithBlock:(void (^)(YapDatabaseReadWriteTransaction *transaction))block
-                completionBlock:(nullable dispatch_block_t)completionBlock;
+                completionBlock:(nullable dispatch_block_t)completionBlock NS_SWIFT_DISABLE_ASYNC;
 
 /**
  * Read-write access to the database.
@@ -446,7 +446,7 @@ typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags) {
  */
 - (void)asyncReadWriteWithBlock:(void (^)(YapDatabaseReadWriteTransaction *transaction))block
                 completionQueue:(nullable dispatch_queue_t)completionQueue
-                completionBlock:(nullable dispatch_block_t)completionBlock;
+                completionBlock:(nullable dispatch_block_t)completionBlock NS_SWIFT_DISABLE_ASYNC;
 
 /**
  * It's sometimes useful to find out when all previously queued transactions on a connection have completed.
