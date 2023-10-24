@@ -12,7 +12,7 @@ static NSUInteger const DEFAULT_METADATA_CACHE_LIMIT = 250;
 @synthesize metadataCacheEnabled = metadataCacheEnabled;
 @synthesize metadataCacheLimit = metadataCacheLimit;
 
-#if TARGET_OS_IOS || TARGET_OS_TV
+#if TARGET_OS_IOS || TARGET_OS_VISION || TARGET_OS_TV
 @synthesize autoFlushMemoryFlags = autoFlushMemoryFlags;
 #endif
 
@@ -26,7 +26,7 @@ static NSUInteger const DEFAULT_METADATA_CACHE_LIMIT = 250;
 		metadataCacheEnabled = YES;
 		metadataCacheLimit = DEFAULT_METADATA_CACHE_LIMIT;
 		
-		#if TARGET_OS_IOS || TARGET_OS_TV
+		#if TARGET_OS_IOS || TARGET_OS_VISION || TARGET_OS_TV
 		autoFlushMemoryFlags = YapDatabaseConnectionFlushMemoryFlags_All;
 		#endif
 	}
@@ -43,7 +43,7 @@ static NSUInteger const DEFAULT_METADATA_CACHE_LIMIT = 250;
 	copy->metadataCacheEnabled = self.metadataCacheEnabled;
 	copy->metadataCacheLimit = self.metadataCacheLimit;
 	
-	#if TARGET_OS_IOS || TARGET_OS_TV
+	#if TARGET_OS_IOS || TARGET_OS_VISION || TARGET_OS_TV
 	copy->autoFlushMemoryFlags = self.autoFlushMemoryFlags;
 	#endif
 	

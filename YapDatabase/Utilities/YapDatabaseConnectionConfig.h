@@ -48,7 +48,7 @@
  */
 @property (atomic, assign, readwrite) NSUInteger metadataCacheLimit;
 
-#if TARGET_OS_IOS || TARGET_OS_TV
+#if TARGET_OS_IOS || TARGET_OS_VISION || TARGET_OS_TV
 
 /**
  * Allows you to configure how the YapDatabaseConnection should flush memory,
