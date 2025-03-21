@@ -1548,7 +1548,7 @@ static YDBLogHandler logHandler = nil;
 
 - (void)beginTransaction
 {
-	int status = status = sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
+	int status = sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
 		YDBLogError(@"Error in 'BEGIN TRANSACTION' %d %s", status, sqlite3_errmsg(db));
@@ -1557,7 +1557,7 @@ static YDBLogHandler logHandler = nil;
 
 - (void)commitTransaction
 {
-	int status = status = sqlite3_exec(db, "COMMIT TRANSACTION;", NULL, NULL, NULL);
+	int status = sqlite3_exec(db, "COMMIT TRANSACTION;", NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
 		YDBLogError(@"Error in 'COMMIT TRANSACTION': %d %s", status, sqlite3_errmsg(db));
