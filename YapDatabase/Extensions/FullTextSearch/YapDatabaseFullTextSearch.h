@@ -5,11 +5,13 @@
 #import <YAP_FRAMEWORK_PREFIX/YapDatabaseFullTextSearchHandler.h>
 #import <YAP_FRAMEWORK_PREFIX/YapDatabaseFullTextSearchConnection.h>
 #import <YAP_FRAMEWORK_PREFIX/YapDatabaseFullTextSearchTransaction.h>
+#import <YAP_FRAMEWORK_PREFIX/YapWhitelistBlacklist.h>
 #else
 #import "YapDatabaseExtension.h"
 #import "YapDatabaseFullTextSearchHandler.h"
 #import "YapDatabaseFullTextSearchConnection.h"
 #import "YapDatabaseFullTextSearchTransaction.h"
+#import "YapWhitelistBlacklist.h"
 #endif
 
 NS_ASSUME_NONNULL_BEGIN
@@ -51,6 +53,13 @@ extern NSString *const YapDatabaseFullTextSearchFTS3Version;
                   handler:(YapDatabaseFullTextSearchHandler *)handler
                ftsVersion:(nullable NSString *)ftsVersion
                versionTag:(nullable NSString *)versionTag;
+
+- (id)initWithColumnNames:(NSArray *)inColumnNames
+              collections:(YapWhitelistBlacklist *)collections
+                  options:(NSDictionary *)inOptions
+                  handler:(YapDatabaseFullTextSearchHandler *)inHandler
+               ftsVersion:(NSString *)inFtsVersion
+               versionTag:(NSString *)inVersionTag;
 
 
 /* Inherited from YapDatabaseExtension

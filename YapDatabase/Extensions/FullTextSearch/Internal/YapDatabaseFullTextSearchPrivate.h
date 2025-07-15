@@ -44,7 +44,8 @@
 @public
 	
 	YapDatabaseFullTextSearchHandler *handler;
-	
+
+    YapWhitelistBlacklist *allowedCollections;
 	NSOrderedSet *columnNames;
 	NSDictionary *options;
 	NSString *ftsVersion;

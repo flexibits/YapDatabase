@@ -231,98 +231,119 @@ static NSString *const ext_key__version_deprecated = @"version";
 	// Remove everything from the database
 	
 	[self removeAllRowids];
-	
+
 	// Enumerate the existing rows in the database and populate the indexes
 	
 	__unsafe_unretained YapDatabaseFullTextSearchHandler *handler = parentConnection->parent->handler;
-	
+    __unsafe_unretained YapWhitelistBlacklist *allowedCollections = parentConnection->parent->allowedCollections;
+
 	if (handler->blockType == YapDatabaseBlockTypeWithKey)
 	{
 		__unsafe_unretained YapDatabaseFullTextSearchWithKeyBlock block =
 		    (YapDatabaseFullTextSearchWithKeyBlock)handler->block;
-		
-		[databaseTransaction _enumerateKeysInAllCollectionsUsingBlock:
-		    ^(int64_t rowid, NSString *collection, NSString *key, BOOL __unused *stop)
-		{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-			
-			block(databaseTransaction, parentConnection->blockDict, collection, key);
-			
-			if ([parentConnection->blockDict count] > 0)
-			{
-				[self addRowid:rowid isNew:YES];
-				[parentConnection->blockDict removeAllObjects];
-			}
-			
-		#pragma clang diagnostic pop
-		}];
+
+        [databaseTransaction enumerateCollectionsUsingBlock:^(NSString *collection, BOOL __unused *outerStop) {
+            if ([allowedCollections isAllowed:collection])
+            {
+                [self->databaseTransaction _enumerateKeysInCollection:collection usingBlock:
+                 ^(int64_t rowid, NSString *key, BOOL __unused *innerStop)
+                 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-retain-self"
+
+                    block(databaseTransaction, parentConnection->blockDict, collection, key);
+
+                    if ([parentConnection->blockDict count] > 0)
+                    {
+                        [self addRowid:rowid isNew:YES];
+                        [parentConnection->blockDict removeAllObjects];
+                    }
+
+#pragma clang diagnostic pop
+                }];
+            }
+        }];
 	}
 	else if (handler->blockType == YapDatabaseBlockTypeWithObject)
 	{
 		__unsafe_unretained YapDatabaseFullTextSearchWithObjectBlock block =
 		    (YapDatabaseFullTextSearchWithObjectBlock)handler->block;
-		
-		[databaseTransaction _enumerateKeysAndObjectsInAllCollectionsUsingBlock:
-		    ^(int64_t rowid, NSString *collection, NSString *key, id object, BOOL __unused *stop)
-		{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-			
-			block(databaseTransaction, parentConnection->blockDict, collection, key, object);
-			
-			if ([parentConnection->blockDict count] > 0)
-			{
-				[self addRowid:rowid isNew:YES];
-				[parentConnection->blockDict removeAllObjects];
-			}
-				 
-		#pragma clang diagnostic pop
-		}];
+
+        [databaseTransaction enumerateCollectionsUsingBlock:^(NSString *collection, BOOL __unused *outerStop) {
+            if ([allowedCollections isAllowed:collection])
+            {
+                [self->databaseTransaction _enumerateKeysAndObjectsInCollection:collection usingBlock:
+                 ^(int64_t rowid, NSString *key, id object, BOOL __unused *innerStop)
+                 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-retain-self"
+
+                    block(databaseTransaction, parentConnection->blockDict, collection, key, object);
+
+                    if ([parentConnection->blockDict count] > 0)
+                    {
+                        [self addRowid:rowid isNew:YES];
+                        [parentConnection->blockDict removeAllObjects];
+                    }
+
+#pragma clang diagnostic pop
+                }];
+            }
+        }];
 	}
 	else if (handler->blockType == YapDatabaseBlockTypeWithMetadata)
 	{
 		__unsafe_unretained YapDatabaseFullTextSearchWithMetadataBlock block =
 		    (YapDatabaseFullTextSearchWithMetadataBlock)handler->block;
-		
-		[databaseTransaction _enumerateKeysAndMetadataInAllCollectionsUsingBlock:
-		    ^(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL __unused *stop)
-		{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-			
-			block(databaseTransaction, parentConnection->blockDict, collection, key, metadata);
-			
-			if ([parentConnection->blockDict count] > 0)
-			{
-				[self addRowid:rowid isNew:YES];
-				[parentConnection->blockDict removeAllObjects];
-			}
-			
-		#pragma clang diagnostic pop
-		}];
+
+        [databaseTransaction enumerateCollectionsUsingBlock:^(NSString *collection, BOOL __unused *outerStop) {
+            if ([allowedCollections isAllowed:collection])
+            {
+                [self->databaseTransaction _enumerateKeysAndMetadataInCollection:collection usingBlock:
+                 ^(int64_t rowid, NSString *key, id metadata, BOOL __unused *innerStop)
+                 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-retain-self"
+
+                    block(databaseTransaction, parentConnection->blockDict, collection, key, metadata);
+
+                    if ([parentConnection->blockDict count] > 0)
+                    {
+                        [self addRowid:rowid isNew:YES];
+                        [parentConnection->blockDict removeAllObjects];
+                    }
+
+#pragma clang diagnostic pop
+                }];
+            }
+        }];
 	}
 	else // if (handler->blockType == YapDatabaseBlockTypeWithRow)
 	{
 		__unsafe_unretained YapDatabaseFullTextSearchWithRowBlock block =
 		    (YapDatabaseFullTextSearchWithRowBlock)handler->block;
-		
-		[databaseTransaction _enumerateRowsInAllCollectionsUsingBlock:
-		    ^(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL __unused *stop)
-		{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-			
-			block(databaseTransaction, parentConnection->blockDict, collection, key, object, metadata);
-			
-			if ([parentConnection->blockDict count] > 0)
-			{
-				[self addRowid:rowid isNew:YES];
-				[parentConnection->blockDict removeAllObjects];
-			}
-			
-		#pragma clang diagnostic pop
-		}];
+
+        [databaseTransaction enumerateCollectionsUsingBlock:^(NSString *collection, BOOL __unused *outerStop) {
+            if ([allowedCollections isAllowed:collection])
+            {
+                [self->databaseTransaction _enumerateRowsInCollection:collection usingBlock:
+                 ^(int64_t rowid, NSString *key, id object, id metadata, BOOL __unused *innerStop)
+                 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-retain-self"
+
+                    block(databaseTransaction, parentConnection->blockDict, collection, key, object, metadata);
+
+                    if ([parentConnection->blockDict count] > 0)
+                    {
+                        [self addRowid:rowid isNew:YES];
+                        [parentConnection->blockDict removeAllObjects];
+                    }
+
+#pragma clang diagnostic pop
+                }];
+            }
+        }];
 	}
 	
 	return YES;
@@ -581,7 +602,14 @@ static NSString *const ext_key__version_deprecated = @"version";
 	
 	__unsafe_unretained NSString *collection = collectionKey.collection;
 	__unsafe_unretained NSString *key = collectionKey.key;
-	
+
+    // don't process if the collection isn't one of the allowed collections
+
+    __unsafe_unretained YapWhitelistBlacklist *allowedCollections = parentConnection->parent->allowedCollections;
+    if (![allowedCollections isAllowed:collectionKey.collection]) {
+        return;
+    }
+
 	// Invoke the block to find out if the object should be included in the index.
 	
 	__unsafe_unretained YapDatabaseFullTextSearchHandler *handler = parentConnection->parent->handler;

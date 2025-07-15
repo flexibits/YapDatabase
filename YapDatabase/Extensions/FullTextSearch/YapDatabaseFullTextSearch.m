@@ -33,28 +33,28 @@ NSString *const YapDatabaseFullTextSearchFTS3Version = @"fts3";
                     withTransaction:(YapDatabaseReadWriteTransaction *)transaction
                       wasPersistent:(BOOL __unused)wasPersistent
 {
-	sqlite3 *db = transaction->connection->db;
-	
-	NSString *tableName = [self tableNameForRegisteredName:registeredName];
-	NSString *dropTable = [NSString stringWithFormat:@"DROP TABLE IF EXISTS \"%@\";", tableName];
-	
-	int status;
-	
-	status = sqlite3_exec(db, [dropTable UTF8String], NULL, NULL, NULL);
-	if (status != SQLITE_OK)
-	{
-		YDBLogError(@"Failed dropping FTS table (%@): %d %s", dropTable, status, sqlite3_errmsg(db));
-	}
+    sqlite3 *db = transaction->connection->db;
+
+    NSString *tableName = [self tableNameForRegisteredName:registeredName];
+    NSString *dropTable = [NSString stringWithFormat:@"DROP TABLE IF EXISTS \"%@\";", tableName];
+
+    int status;
+
+    status = sqlite3_exec(db, [dropTable UTF8String], NULL, NULL, NULL);
+    if (status != SQLITE_OK)
+    {
+        YDBLogError(@"Failed dropping FTS table (%@): %d %s", dropTable, status, sqlite3_errmsg(db));
+    }
 }
 
 + (NSArray *)previousClassNames
 {
-	return @[ @"YapCollectionsDatabaseFullTextSearch" ];
+    return @[ @"YapCollectionsDatabaseFullTextSearch" ];
 }
 
 + (NSString *)tableNameForRegisteredName:(NSString *)registeredName
 {
-	return [NSString stringWithFormat:@"fts_%@", registeredName];
+    return [NSString stringWithFormat:@"fts_%@", registeredName];
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -68,17 +68,17 @@ NSString *const YapDatabaseFullTextSearchFTS3Version = @"fts3";
 - (id)initWithColumnNames:(NSArray *)inColumnNames
                   handler:(YapDatabaseFullTextSearchHandler *)inHandler
 {
-	return [self initWithColumnNames:inColumnNames options:nil handler:inHandler versionTag:nil];
+    return [self initWithColumnNames:inColumnNames options:nil handler:inHandler versionTag:nil];
 }
 
 - (id)initWithColumnNames:(NSArray *)inColumnNames
-                    handler:(YapDatabaseFullTextSearchHandler *)inHandler
+                  handler:(YapDatabaseFullTextSearchHandler *)inHandler
                versionTag:(NSString *)inVersionTag
 {
-	return [self initWithColumnNames:inColumnNames
-	                         options:nil
-	                         handler:inHandler
-	                      versionTag:inVersionTag];
+    return [self initWithColumnNames:inColumnNames
+                             options:nil
+                             handler:inHandler
+                          versionTag:inVersionTag];
 }
 
 - (id)initWithColumnNames:(NSArray *)inColumnNames
@@ -98,6 +98,21 @@ NSString *const YapDatabaseFullTextSearchFTS3Version = @"fts3";
                   handler:(YapDatabaseFullTextSearchHandler *)inHandler
                ftsVersion:(NSString *)inFtsVersion
                versionTag:(NSString *)inVersionTag {
+    return [self initWithColumnNames:inColumnNames
+                         collections:[[YapWhitelistBlacklist alloc] initWithBlacklist:nil]
+                             options:inOptions
+                             handler:inHandler
+                          ftsVersion:inFtsVersion
+                          versionTag:inVersionTag];
+}
+
+- (id)initWithColumnNames:(NSArray *)inColumnNames
+              collections:(YapWhitelistBlacklist *)collections
+                  options:(NSDictionary *)inOptions
+                  handler:(YapDatabaseFullTextSearchHandler *)inHandler
+               ftsVersion:(NSString *)inFtsVersion
+               versionTag:(NSString *)inVersionTag
+{
     if ([inColumnNames count] == 0)
     {
         NSAssert(NO, @"Empty columnNames array");
@@ -126,7 +141,9 @@ NSString *const YapDatabaseFullTextSearchFTS3Version = @"fts3";
     {
         columnNames = [NSOrderedSet orderedSetWithArray:inColumnNames];
         columnNamesSharedKeySet = [NSDictionary sharedKeySetForKeys:[columnNames array]];
-        
+
+        allowedCollections = collections;
+
         options = [inOptions copy];
         
         handler = inHandler;
