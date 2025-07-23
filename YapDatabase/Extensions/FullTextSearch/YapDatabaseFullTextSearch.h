@@ -54,12 +54,12 @@ extern NSString *const YapDatabaseFullTextSearchFTS3Version;
                ftsVersion:(nullable NSString *)ftsVersion
                versionTag:(nullable NSString *)versionTag;
 
-- (id)initWithColumnNames:(NSArray *)inColumnNames
+- (id)initWithColumnNames:(NSArray<NSString *> *)inColumnNames
               collections:(YapWhitelistBlacklist *)collections
-                  options:(NSDictionary *)inOptions
+                  options:(nullable NSDictionary *)inOptions
                   handler:(YapDatabaseFullTextSearchHandler *)inHandler
-               ftsVersion:(NSString *)inFtsVersion
-               versionTag:(NSString *)inVersionTag;
+               ftsVersion:(nullable NSString *)inFtsVersion
+               versionTag:(nullable NSString *)inVersionTag;
 
 
 /* Inherited from YapDatabaseExtension
