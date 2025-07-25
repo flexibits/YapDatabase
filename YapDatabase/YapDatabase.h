@@ -633,6 +633,12 @@ extern NSString *const YapDatabaseModifiedExternallyKey;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
+ * Set registrationConnection to nil
+ * Useful if we need an instance of YapDatabase to get released before the 5 second lifetime of registrationConnection, such as in unit tests
+ */
+- (void)invalidateRegistrationConnection;
+
+/**
  * Registers the extension with the database using the given name.
  * After registration everything works automatically using just the extension name.
  * 

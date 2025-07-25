@@ -2501,6 +2501,19 @@ static YDBLogHandler logHandler = nil;
 	return registrationConnection;
 }
 
+- (void)invalidateRegistrationConnection
+{
+    __weak YapDatabase *weakSelf = self;
+
+    dispatch_async(writeQueue, ^{
+        __strong YapDatabase *strongSelf = weakSelf;
+
+        if (strongSelf != nil) {
+            strongSelf->registrationConnection = nil;
+        }
+    });
+}
+
 /**
  * Internal method that handles extension registration.
  * This method must be invoked on the writeQueue.
