@@ -3247,10 +3247,10 @@ static YDBLogHandler logHandler = nil;
 			[strongSelf->changesets removeObjectAtIndex:0];
 		}
 		
-		#if !OS_OBJECT_USE_OBJC
+#if !OS_OBJECT_USE_OBJC
 		if (group)
 			dispatch_release(group);
-		#endif
+#endif //!OS_OBJECT_USE_OBJC
 		
 	#pragma clang diagnostic pop
 	};
@@ -3687,6 +3687,9 @@ static YDBLogHandler logHandler = nil;
 	long ready = 0;
 	if (group) {
 		ready = dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(50 * NSEC_PER_MSEC)));
+#if !OS_OBJECT_USE_OBJC
+		dispatch_release(group);
+#endif // !OS_OBJECT_USE_OBJC
 	}
 	
 	if (ready != 0)

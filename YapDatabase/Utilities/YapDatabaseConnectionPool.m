@@ -33,6 +33,13 @@
 	return self;
 }
 
+#if !OS_OBJECT_HAVE_OBJC_SUPPORT
+- (void)dealloc
+{
+	dispatch_release(queue);
+}
+#endif // !OS_OBJECT_HAVE_OBJC_SUPPORT
+
 - (NSUInteger)connectionLimit
 {
 	__block NSUInteger result = 0;

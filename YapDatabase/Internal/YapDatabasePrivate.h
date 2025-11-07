@@ -463,7 +463,11 @@ static NSString *const ext_key_class = @"class";
 
 @interface YapDatabaseReadWriteTransaction () {
 @public
-	NSMutableArray<dispatch_queue_t> *completionQueueStack;
+#if OS_OBJECT_HAVE_OBJC_SUPPORT
+    NSMutableArray<dispatch_queue_t> *completionQueueStack;
+#else
+	NSMutableArray<NSValue *> *completionQueueStack;
+#endif // OS_OBJECT_HAVE_OBJC_SUPPORT
 	NSMutableArray<dispatch_block_t> *completionBlockStack;
 	
 	BOOL rollback;
