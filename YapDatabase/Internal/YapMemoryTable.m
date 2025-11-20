@@ -90,6 +90,14 @@
 	}
 	return self;
 }
+
+#if !OS_OBJECT_HAVE_OBJC_SUPPORT
+- (void)dealloc
+{
+	dispatch_release(queue);
+}
+#endif // !OS_OBJECT_HAVE_OBJC_SUPPORT
+
 - (YapMemoryTableTransaction *)newReadTransactionWithSnapshot:(uint64_t)snapshot
 {
 	YapMemoryTableTransaction *transaction = [[YapMemoryTableTransaction alloc] init];

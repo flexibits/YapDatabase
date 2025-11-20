@@ -4589,6 +4589,21 @@
 
 @implementation YapDatabaseReadWriteTransaction
 
+#if !OS_OBJECT_USE_OBJC
+- (void)dealloc
+{
+	if (completionBlockStack != nil)
+	{
+		for (NSValue *completionQueueObject in completionQueueStack)
+		{
+			dispatch_queue_t dispatchQueue = [completionQueueObject pointerValue];
+
+			dispatch_release(dispatchQueue);
+		}
+	}
+}
+#endif // !OS_OBJECT_USE_OBJC
+
 #pragma mark Transaction Control
 
 /**
@@ -6079,7 +6094,16 @@
 	if (completionBlockStack == nil)
 		completionBlockStack = [[NSMutableArray alloc] initWithCapacity:1];
 	
-	[completionQueueStack addObject:completionQueue];
+	id completionQueueObject;
+
+#if OS_OBJECT_USE_OBJC
+	completionQueueObject = completionQueue;
+#else
+	dispatch_retain(completionQueue);
+	completionQueueObject = [NSValue valueWithPointer:completionQueue];
+#endif // OS_OBJECT_USE_OBJC
+
+	[completionQueueStack addObject:completionQueueObject];
 	[completionBlockStack addObject:completionBlock];
 }
 

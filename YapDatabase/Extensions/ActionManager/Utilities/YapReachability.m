@@ -193,6 +193,10 @@ static void TMReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkRea
 	self.reachableBlock          = nil;
 	self.unreachableBlock        = nil;
 	self.reachabilitySerialQueue = nil;
+
+#if !OS_OBJECT_HAVE_OBJC_SUPPORT
+	dispatch_release(self.reachabilitySerialQueue);
+#endif // !OS_OBJECT_HAVE_OBJC_SUPPORT
 }
 
 #pragma mark - Notifier Methods
