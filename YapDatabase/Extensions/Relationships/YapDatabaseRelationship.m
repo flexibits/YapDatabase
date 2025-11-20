@@ -80,14 +80,14 @@
 	return self;
 }
 
-#if !OS_OBJECT_HAVE_OBJC_SUPPORT
+#if !OS_OBJECT_USE_OBJC
 - (void)dealloc
 {
 	if (fileManagerQueue) {
 		dispatch_release(fileManagerQueue);
 	}
 }
-#endif // !OS_OBJECT_HAVE_OBJC_SUPPORT
+#endif // !OS_OBJECT_USE_OBJC
 
 - (YapDatabaseRelationshipOptions *)options
 {

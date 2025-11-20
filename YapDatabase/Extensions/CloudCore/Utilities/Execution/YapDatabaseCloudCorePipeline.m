@@ -166,9 +166,9 @@ NSString *const YDBCloudCore_EphemeralKey_Hold     = @"hold";
 		holdTimerSuspended = NO;
 	}
 
-#if !OS_OBJECT_HAVE_OBJC_SUPPORT
+#if !OS_OBJECT_USE_OBJC
 	dispatch_release(queue);
-#endif // !OS_OBJECT_HAVE_OBJC_SUPPORT
+#endif // !OS_OBJECT_USE_OBJC
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

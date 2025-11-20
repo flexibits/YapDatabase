@@ -164,12 +164,12 @@ NSString *const YapDatabaseCloudCoreDefaultPipelineName = @"default";
 	return self;
 }
 
-#if !OS_OBJECT_HAVE_OBJC_SUPPORT
+#if !OS_OBJECT_USE_OBJC
 - (void)dealloc
 {
 	dispatch_release(queue);
 }
-#endif // !OS_OBJECT_HAVE_OBJC_SUPPORT
+#endif // !OS_OBJECT_USE_OBJC
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark YapDatabaseExtension Protocol
