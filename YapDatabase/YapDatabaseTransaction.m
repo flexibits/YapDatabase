@@ -351,10 +351,11 @@
 		return NO;
 	}
 	
-	NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-	if (cachedRowid != nil)
+	BOOL foundKey;
+	int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+	if (foundKey)
 	{
-		if (rowidPtr) *rowidPtr = [cachedRowid longLongValue];
+		if (rowidPtr) *rowidPtr = cachedRowid;
 		return YES;
 	}
 	
@@ -396,7 +397,7 @@
 	FreeYapDatabaseString(&_key);
 	
 	if (result) {
-		[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+		[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 	}
 	
 	if (rowidPtr) *rowidPtr = rowid;
@@ -410,10 +411,9 @@
 }
 
 - (YapCollectionKey *)collectionKeyForRowid:(int64_t)rowid
-{
-	NSNumber *rowidNumber = @(rowid);
-	
-	YapCollectionKey *collectionKey = [connection->keyCache objectForKey:rowidNumber];
+{	
+	YapCollectionKey *collectionKey = [connection->keyCache cachedObjectForKey:rowid];
+
 	if (collectionKey)
 	{
 		return collectionKey;
@@ -446,7 +446,7 @@
 		
 		collectionKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
 		
-		[connection->keyCache setObject:collectionKey forKey:rowidNumber];
+		[connection->keyCache setCachedObject:collectionKey forKey:rowid];
 	}
 	else if (status == SQLITE_ERROR)
 	{
@@ -525,7 +525,7 @@
 
 - (BOOL)hasRowid:(int64_t)rowid
 {
-	if ([connection->keyCache containsKey:@(rowid)])
+	if ([connection->keyCache containsCachedKey:rowid])
 		return YES;
 	
 	sqlite3_stmt *statement = [connection getCountForRowidStatement];
@@ -823,10 +823,12 @@
 	if (object)
 		return object;
 	
-	NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-	if (cachedRowid != nil)
+	BOOL foundKey;
+	int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+
+	if (foundKey)
 	{
-		int64_t rowid = [cachedRowid longLongValue];
+		int64_t rowid = cachedRowid;
 		
 		sqlite3_stmt *statement = [connection getDataForRowidStatement];
 		if (statement == NULL) return nil;
@@ -901,7 +903,7 @@
 			
 			// Update caches
 			
-			[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+			[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 			
 			if (object) {
 				[connection->objectCache setObject:object forKey:cacheKey];
@@ -946,10 +948,12 @@
 			return metadata;
 	}
 	
-	NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-	if (cachedRowid != nil)
+	BOOL foundKey;
+	int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+
+	if (foundKey)
 	{
-		int64_t rowid = [cachedRowid longLongValue];
+		int64_t rowid = cachedRowid;
 		
 		sqlite3_stmt *statement = [connection getMetadataForRowidStatement];
 		if (statement == NULL) return nil;
@@ -1028,7 +1032,7 @@
 			
 			// Update caches
 			
-			[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+			[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 			
 			if (metadata)
 				[connection->metadataCache setObject:metadata forKey:cacheKey];
@@ -1090,10 +1094,12 @@
 		// Both object and metadata are missing.
 		// Fetch via query.
 		
-		NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-		if (cachedRowid != nil)
+		BOOL foundKey;
+		int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+
+		if (foundKey)
 		{
-			int64_t rowid = [cachedRowid longLongValue];
+			int64_t rowid = cachedRowid;
 			
 			sqlite3_stmt *statement = [connection getAllForRowidStatement];
 			if (statement == NULL) {
@@ -1192,7 +1198,7 @@
 			{
 				int64_t rowid = sqlite3_column_int64(statement, column_idx_rowid);
 				
-				[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+				[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 				
 				if (objectPtr)
 				{
@@ -1270,11 +1276,13 @@
 	
 	NSData *result = nil;
 	YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
-	
-	NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-	if (cachedRowid != nil)
+
+	BOOL foundKey;
+	int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+
+	if (cachedRowid)
 	{
-		int64_t rowid = [cachedRowid longLongValue];
+		int64_t rowid = cachedRowid;
 		
 		sqlite3_stmt *statement = [connection getDataForRowidStatement];
 		if (statement == NULL) return nil;
@@ -1332,7 +1340,7 @@
 			
 			// Update cache
 			
-			[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+			[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 		}
 		else if (status == SQLITE_ERROR)
 		{
@@ -1365,11 +1373,12 @@
 	
 	NSData *result = nil;
 	YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
-	
-	NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-	if (cachedRowid != nil)
+	BOOL foundKey;
+	int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+
+	if (foundKey)
 	{
-		int64_t rowid = [cachedRowid longLongValue];
+		int64_t rowid = cachedRowid;
 		
 		sqlite3_stmt *statement = [connection getMetadataForRowidStatement];
 		if (statement == NULL) return nil;
@@ -1427,7 +1436,7 @@
 			
 			// Update cache
 			
-			[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+			[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 		}
 		else if (status == SQLITE_ERROR)
 		{
@@ -1471,11 +1480,12 @@
 	BOOL found = NO;
 	
 	YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
-	
-	NSNumber *cachedRowid = [connection->keyCache keyForObject:cacheKey];
-	if (cachedRowid != nil)
+	BOOL foundKey;
+	int64_t cachedRowid = [connection->keyCache cachedKeyForObject:cacheKey foundKey:&foundKey];
+
+	if (foundKey)
 	{
-		int64_t rowid = [cachedRowid longLongValue];
+		int64_t rowid = cachedRowid;
 		
 		sqlite3_stmt *statement = [connection getAllForRowidStatement];
 		if (statement == NULL) {
@@ -1569,7 +1579,7 @@
 			
 			// Update cache
 			
-			[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+			[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 		}
 		else if (status == SQLITE_ERROR)
 		{
@@ -4893,7 +4903,7 @@
 		{
 			rowid = sqlite3_last_insert_rowid(connection->db);
 			
-			[connection->keyCache setObject:cacheKey forKey:@(rowid)];
+			[connection->keyCache setCachedObject:cacheKey forKey:rowid];
 		}
 		else
 		{
@@ -5487,7 +5497,7 @@
 	connection->hasDiskChanges = YES;
 	[connection->mutationStack markAsMutated];  // mutation during enumeration protection
 	
-	[connection->keyCache removeObjectForKey:@(rowid)];
+	[connection->keyCache removeCachedObjectForKey:rowid];
 	[connection->objectCache removeObjectForKey:cacheKey];
 	[connection->metadataCache removeObjectForKey:cacheKey];
 	
@@ -5743,9 +5753,9 @@
 	
 	{ // keyCache
 		
-		[connection->keyCache enumerateKeysAndObjectsWithBlock:^(id key, id obj, BOOL __unused *stop) {
+		[connection->keyCache enumerateCachedKeysAndObjectsWithBlock:^(int64_t key, id obj, BOOL __unused *stop) {
 			
-			__unsafe_unretained NSNumber *rowidNumber = (NSNumber *)key;
+			NSNumber *rowidNumber = @(key);
 			__unsafe_unretained YapCollectionKey *collectionKey = (YapCollectionKey *)obj;
 			if ([collectionKey.collection isEqualToString:collection])
 			{

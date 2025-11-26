@@ -231,18 +231,13 @@ static int connectionBusyHandler(void *ptr, int count)
 		
 		NSUInteger keyCacheLimit = [self calculateKeyCacheLimit];
 		
-		YapBidirectionalCacheCallBacks RowidCallBacks = kYapBidirectionalCacheDefaultCallBacks;
-		RowidCallBacks.shouldCopy = NO;
-		
-		YapBidirectionalCacheCallBacks YapCollectionKeyCallBacks = kYapBidirectionalCacheDefaultCallBacks;
+		YapBidirectionalKeyCacheCallBacks YapCollectionKeyCallBacks = kYapBidirectionalKeyCacheDefaultCallBacks;
 		YapCollectionKeyCallBacks.shouldCopy = NO;
 		YapCollectionKeyCallBacks.equal = (CFDictionaryEqualCallBack)YapCollectionKeyEqual;
 		YapCollectionKeyCallBacks.hash = (CFDictionaryHashCallBack)YapCollectionKeyHash;
 		
-		keyCache = [[YapBidirectionalCache alloc] initWithCountLimit:keyCacheLimit
-		                                                keyCallbacks:&RowidCallBacks
+		keyCache = [[YapBidirectionalKeyCache alloc] initWithCountLimit:keyCacheLimit
 		                                             objectCallbacks:&YapCollectionKeyCallBacks];
-		keyCache.allowedKeyClasses = [NSSet setWithObject:[NSNumber class]];
 		keyCache.allowedObjectClasses = [NSSet setWithObject:[YapCollectionKey class]];
 		
 		#if YapDatabaseEnforcePermittedTransactions
@@ -4126,10 +4121,10 @@ static int connectionBusyHandler(void *ptr, int count)
 		
 		if (hasRemovedCollections)
 		{
-			__block NSMutableArray *toRemove = nil;
-			[keyCache enumerateKeysAndObjectsWithBlock:^(id key, id obj, BOOL __unused *stop) {
-				
-				__unsafe_unretained NSNumber *rowidNumber = (NSNumber *)key;
+			__block NSMutableArray<NSNumber *> *toRemove = nil;
+
+			[keyCache enumerateCachedKeysAndObjectsWithBlock:^(int64_t key, id obj, BOOL __unused *stop) {
+				NSNumber *rowidNumber = @(key);
 				__unsafe_unretained YapCollectionKey *collectionKey = (YapCollectionKey *)obj;
 				
 				if ([changeset_removedCollections containsObject:collectionKey.collection])

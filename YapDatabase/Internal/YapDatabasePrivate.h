@@ -7,6 +7,7 @@
 #import "YapDatabaseExtension.h"
 
 #import "YapBidirectionalCache.h"
+#import "YapBidirectionalKeyCache.h"
 #import "YapCache.h"
 #import "YapCollectionKey.h"
 #import "YapDatabaseCollectionConfig.h"
@@ -218,7 +219,7 @@ static NSString *const ext_key_class = @"class";
 	BOOL hasDiskChanges;
 	BOOL enableMultiProcessSupport;
 	
-	YapBidirectionalCache<NSNumber *, YapCollectionKey *> *keyCache;
+	YapBidirectionalKeyCache<YapCollectionKey *> *keyCache;
 	YapCache<YapCollectionKey *, id> *objectCache;
 	YapCache<YapCollectionKey *, id> *metadataCache;
 	
