@@ -2497,8 +2497,8 @@ static int connectionBusyHandler(void *ptr, int count)
 		if (!changesets) // we could not retrieve changeset due to a change from another process.
 		{
 			NSUInteger flags = YapDatabaseConnectionFlushMemoryFlags_Caches |
-			                   YapDatabaseConnectionFlushMemoryFlags_Extension_State;
-			
+			                   (NSUInteger)YapDatabaseConnectionFlushMemoryFlags_Extension_State;
+
 			[self _flushMemoryWithFlags:flags];
 			snapshot = dbSnapshot;
 		}
@@ -2829,8 +2829,8 @@ static int connectionBusyHandler(void *ptr, int count)
 		if (!changesets) // we could not retrieve changeset due to a change from another process.
 		{
 			NSUInteger flags = YapDatabaseConnectionFlushMemoryFlags_Caches |
-			                   YapDatabaseConnectionFlushMemoryFlags_Extension_State;
-			
+                               (NSUInteger)YapDatabaseConnectionFlushMemoryFlags_Extension_State;
+
 			[self _flushMemoryWithFlags:flags];
 			snapshot = dbSnapshot;
 		}
@@ -4104,8 +4104,8 @@ static int connectionBusyHandler(void *ptr, int count)
 	if (changeset_modifiedExternally)
 	{
 		NSUInteger flags = YapDatabaseConnectionFlushMemoryFlags_Caches |
-		                   YapDatabaseConnectionFlushMemoryFlags_Extension_State;
-		
+                           (NSUInteger)YapDatabaseConnectionFlushMemoryFlags_Extension_State;
+
 		[self _flushMemoryWithFlags:flags];
 	}
 	
@@ -4470,7 +4470,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		snapshot = changesetSnapshot;
 		
 		NSUInteger flags = YapDatabaseConnectionFlushMemoryFlags_Caches |
-		                   YapDatabaseConnectionFlushMemoryFlags_Extension_State;
+                           (NSUInteger)YapDatabaseConnectionFlushMemoryFlags_Extension_State;
 		
 		[self _flushMemoryWithFlags:flags];
 		[self processChangeset:changeset];
