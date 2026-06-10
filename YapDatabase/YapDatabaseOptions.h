@@ -27,6 +27,9 @@ typedef NS_ENUM(NSInteger, YapDatabasePragmaSynchronous) {
 	YapDatabasePragmaSynchronous_Full   = 2,
 };
 
+struct sqlite3;
+typedef void (^YapDatabaseSQLiteConnectionSetupBlock)(struct sqlite3 *db);
+
 #ifdef SQLITE_HAS_CODEC
 typedef NSData *_Nonnull (^YapDatabaseCipherKeyBlock)(void);
 
@@ -356,6 +359,19 @@ typedef NS_ENUM(NSInteger, YapDatabaseCipherCompatability) {
  *
  */
 @property (nonatomic, assign, readwrite) BOOL enableMultiProcessSupport;
+
+/**
+ * An optional block invoked with each sqlite3 database handle right after YapDatabase opens it,
+ * including the internal handle owned by YapDatabase itself and the handle owned by each
+ * YapDatabaseConnection.
+ *
+ * Use this for per-connection setup that must happen before the connection is used, such as
+ * registering custom FTS5 tokenizers. (sqlite3_auto_extension is unavailable in the SQLite
+ * builds that ship with Apple platforms.)
+ *
+ * The default value is nil.
+ */
+@property (nonatomic, copy, readwrite, nullable) YapDatabaseSQLiteConnectionSetupBlock sqliteConnectionSetup;
 
 @end
 
