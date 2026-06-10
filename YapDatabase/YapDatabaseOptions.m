@@ -31,6 +31,7 @@
 #endif
 @synthesize aggressiveWALTruncationSize = aggressiveWALTruncationSize;
 @synthesize enableMultiProcessSupport = enableMultiProcessSupport;
+@synthesize sqliteConnectionSetup = sqliteConnectionSetup;
 
 - (id)init
 {
@@ -67,7 +68,8 @@
 #endif
 	copy->aggressiveWALTruncationSize = aggressiveWALTruncationSize;
     copy->enableMultiProcessSupport = enableMultiProcessSupport;
-	
+	copy->sqliteConnectionSetup = sqliteConnectionSetup;
+
 	return copy;
 }
 

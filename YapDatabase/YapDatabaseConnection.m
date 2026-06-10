@@ -291,8 +291,13 @@ static int connectionBusyHandler(void *ptr, int count)
 			}
 			else
 			{
+				if (options.sqliteConnectionSetup)
+				{
+					options.sqliteConnectionSetup(db);
+				}
+
 				// Set configurable pragmas
-				
+
 				YapDatabasePragmaSynchronous pragmaSynchronous = options.pragmaSynchronous;
 				
 				if (pragmaSynchronous == YapDatabasePragmaSynchronous_Off ||

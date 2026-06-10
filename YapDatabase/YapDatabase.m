@@ -776,6 +776,11 @@ static YDBLogHandler logHandler = nil;
         sqlite3_busy_handler(db, connectionBusyHandler, (__bridge void *)(self));
     }
 	
+	if (options.sqliteConnectionSetup)
+	{
+		options.sqliteConnectionSetup(db);
+	}
+	
 	return YES;
 }
 
