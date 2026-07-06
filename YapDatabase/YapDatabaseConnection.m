@@ -2924,14 +2924,13 @@ static int connectionBusyHandler(void *ptr, int count)
 		// Rollback sqlite database transaction.
 		
 		[transaction rollbackTransaction];
-		
+
 		// Rollback-Write-Transaction: Step 3 of 3
 		//
 		// Reset any in-memory variables which may be out-of-sync with the database.
-		
-		[objectCache removeAllObjects];
-		[metadataCache removeAllObjects];
-		
+
+		[self _flushMemoryWithFlags:YapDatabaseConnectionFlushMemoryFlags_Caches];
+
 	}
 	else // if (!transaction->rollback)
 	{
