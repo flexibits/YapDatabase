@@ -153,29 +153,84 @@
 	[yapMemoryTableTransaction commit];
 }
 
-- (void)commitTransaction
+- (BOOL)commitTransaction
 {
+	BOOL committed = NO;
+
 	sqlite3_stmt *statement = [connection commitTransactionStatement];
 	if (statement)
 	{
 		// COMMIT TRANSACTION;
-		
+
 		int status = sqlite3_step(statement);
-		if (status != SQLITE_DONE)
+		if (status == SQLITE_DONE)
 		{
-			YDBLogError(@"Couldn't commit transaction: %d %s", status, sqlite3_errmsg(connection->db));
+			committed = YES;
 		}
-		
+		else
+		{
+			// COMMIT can fail (SQLITE_FULL / SQLITE_IOERR / SQLITE_NOMEM, e.g. disk full while
+			// appending to the WAL). Per sqlite's documented "response to errors within a
+			// transaction", such errors may have already rolled the ENTIRE transaction back
+			// automatically. Either way, nothing was committed. Callers MUST treat this like a
+			// rollback (flush caches, don't trust the changeset), otherwise in-memory state
+			// (keyCache in particular) describes rows that don't exist on disk, and rowid reuse
+			// later corrupts unrelated rows.
+
+			YDBLogError(@"Couldn't commit transaction: %d %s", status, sqlite3_errmsg(connection->db));
+
+			if (isReadWriteTransaction && !sqlite3_get_autocommit(connection->db))
+			{
+				// sqlite did NOT auto-rollback; the transaction is still open.
+				// Roll it back explicitly so the outcome is deterministic
+				// (a zombie transaction would swallow every subsequent BEGIN/COMMIT).
+
+				sqlite3_stmt *rbStatement = [connection rollbackTransactionStatement];
+				if (rbStatement)
+				{
+					int rbStatus = sqlite3_step(rbStatement);
+					if (rbStatus != SQLITE_DONE)
+					{
+						YDBLogError(@"Couldn't rollback failed commit: %d %s",
+						            rbStatus, sqlite3_errmsg(connection->db));
+					}
+					sqlite3_reset(rbStatement);
+				}
+			}
+		}
+
 		sqlite3_reset(statement);
 	}
-	
+
 	if (isReadWriteTransaction)
 	{
-		[extensions enumerateKeysAndObjectsUsingBlock:^(id __unused extNameObj, id extTransactionObj, BOOL __unused *stop) {
-			
-			[(YapDatabaseExtensionTransaction *)extTransactionObj didCommitTransaction];
-		}];
+		if (committed)
+		{
+			[extensions enumerateKeysAndObjectsUsingBlock:^(id __unused extNameObj, id extTransactionObj, BOOL __unused *stop) {
+
+				[(YapDatabaseExtensionTransaction *)extTransactionObj didCommitTransaction];
+			}];
+		}
+		else
+		{
+			// The transaction was rolled back (by sqlite or by us, above), so extensions must be
+			// told the truth. didCommitTransaction would have them act on a commit that never
+			// happened — e.g. YapDatabaseRelationship deletes files from disk in didCommit, and
+			// extension connections would adopt in-memory state describing rolled-back rows.
+
+			[extensions enumerateKeysAndObjectsUsingBlock:^(id __unused extNameObj, id extTransactionObj, BOOL __unused *stop) {
+
+				[(YapDatabaseExtensionTransaction *)extTransactionObj didRollbackTransaction];
+			}];
+
+			// The memory tables were committed in preCommitReadWriteTransaction (before the sqlite
+			// COMMIT ran), so they hold values for a transaction that never happened. Strip them.
+
+			[yapMemoryTableTransaction rollback];
+		}
 	}
+
+	return committed;
 }
 
 - (void)rollbackTransaction

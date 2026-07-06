@@ -3091,9 +3091,31 @@ static YDBLogHandler logHandler = nil;
 	// We save the changeset in advance to handle possible edge cases.
 	
 	[changesets addObject:pendingChangeset];
-	
+
 	YDBLogVerbose(@"Adding pending changeset %@ for database: %@",
 	              [[changesets lastObject] objectForKey:YapDatabaseSnapshotKey], self);
+}
+
+/**
+ * This method is only accessible from within the snapshotQueue.
+ *
+ * If the sqlite COMMIT fails after the changeset was registered via notePendingChangeset:,
+ * nothing was written to disk and the changeset must be retracted so it is never delivered.
+ *
+ * This is safe because a pending changeset cannot have been consumed by any other connection yet:
+ * connections only fetch changesets when they observe a snapshot LARGER than their own, and the
+ * failed changeset's snapshot never becomes visible anywhere — not on disk (the sqlite transaction
+ * rolled back, taking the yap2 snapshot write with it), and not in memory (noteCommittedChangeset
+ * never runs for a failed commit, so neither database->snapshot nor any peer connection advances).
+**/
+- (void)retractPendingChangeset:(NSDictionary *)pendingChangeset fromConnection:(YapDatabaseConnection __unused *)sender
+{
+	NSAssert(dispatch_get_specific(IsOnSnapshotQueueKey), @"Must go through snapshotQueue for atomic access.");
+
+	[changesets removeObjectIdenticalTo:pendingChangeset];
+
+	YDBLogVerbose(@"Retracted pending changeset %@ for database: %@",
+	              [pendingChangeset objectForKey:YapDatabaseSnapshotKey], self);
 }
 
 /**
