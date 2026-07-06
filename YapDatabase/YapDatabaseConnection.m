@@ -2951,10 +2951,12 @@ static int connectionBusyHandler(void *ptr, int count)
 		// The "external" changeset gets plugged into the YapDatabaseModifiedNotification as the userInfo dict.
 		
 		NSNotification *notification = nil;
-		
+
 		NSMutableDictionary *changeset = nil;
 		NSMutableDictionary *userInfo = nil;
-		
+
+		BOOL snapshotIncremented = NO;
+
 		[self getInternalChangeset:&changeset externalChangeset:&userInfo];
 		if (changeset || userInfo || hasDiskChanges)
 		{
@@ -2963,11 +2965,13 @@ static int connectionBusyHandler(void *ptr, int count)
 			//
 			// If hasDiskChanges is NO, then the database file was not modified.
 			// However, something was "touched" or an in-memory extension was changed.
-			
+
 			if (hasDiskChanges || enableMultiProcessSupport)
 				snapshot = [self incrementSnapshotInDatabase];
 			else
 				snapshot++;
+
+			snapshotIncremented = YES;
 			
 			if (changeset == nil)
 				changeset = [NSMutableDictionary dictionaryWithSharedKeySet:sharedKeySetForInternalChangeset];
@@ -3137,21 +3141,59 @@ static int connectionBusyHandler(void *ptr, int count)
 		// from the database. If it doesn't match what we expect, then we know we've run into the race condition,
 		// and we make the read-only transaction back out and try again.
 		
-		[transaction commitTransaction];
-		
+		BOOL committed = [transaction commitTransaction];
+		if (!committed)
+		{
+			// The sqlite COMMIT failed (e.g. disk full / I/O error while appending to the WAL),
+			// which means the transaction was rolled back — either automatically by sqlite, or
+			// explicitly by commitTransaction. Nothing we wrote exists on disk, but all of our
+			// in-memory state says it does. This is the same situation as an explicit rollback,
+			// so it needs the same cache flush; keyCache especially, because stale
+			// rowid <-> collectionKey entries + rowid reuse silently corrupt OTHER rows on the
+			// next write (see the flush in the rollback branch above).
+
+			NSUInteger flags = YapDatabaseConnectionFlushMemoryFlags_Caches |
+			                   (NSUInteger)YapDatabaseConnectionFlushMemoryFlags_Extension_State;
+
+			[self _flushMemoryWithFlags:flags];
+
+			// Undo the snapshot increment (the yap2 snapshot write rolled back with the
+			// transaction, so disk still has the old value). Leaving the in-memory snapshot
+			// ahead of disk would let another process claim the same snapshot number for a
+			// REAL commit — which we would then never detect (snapshot equality), leaving
+			// every cache silently stale. The pending changeset is retracted below.
+
+			if (snapshotIncremented)
+			{
+				snapshot--;
+			}
+		}
+
 		__block uint64_t minSnapshot = UINT64_MAX;
-	
+
 		dispatch_sync(database->snapshotQueue, ^{ @autoreleasepool {
 		#pragma clang diagnostic push
 		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-			
+
 			// Post-Write-Transaction: Step 7 of 11
 			//
 			// Notify database of changes, and drop reference to set of changed keys.
-			
+			//
+			// If the commit FAILED, the pending changeset describes a transaction that never
+			// happened — retract it instead of delivering it. No other connection can have
+			// consumed it yet (see retractPendingChangeset:), so peers never see phantom data
+			// and neither database->snapshot nor any peer connection advances.
+
 			if (changeset)
 			{
-				[database noteCommittedChangeset:changeset fromConnection:self];
+				if (committed)
+                {
+                    [database noteCommittedChangeset:changeset fromConnection:self];
+                }
+				else
+                {
+                    [database retractPendingChangeset:changeset fromConnection:self];
+                }
 			}
 			
 			// Post-Write-Transaction: Step 8 of 11
@@ -3177,13 +3219,13 @@ static int connectionBusyHandler(void *ptr, int count)
 		#pragma clang diagnostic pop
 		}});
 	
-		if (changeset)
+		if (changeset && committed)
 		{
 			// Post-Write-Transaction: Step 9 of 11
 			//
 			// We added frames to the WAL.
 			// We can invoke a checkpoint if there are no other active connections.
-			
+
 			if (minSnapshot == UINT64_MAX)
 			{
 				[database asyncCheckpoint:snapshot];
@@ -3227,8 +3269,8 @@ static int connectionBusyHandler(void *ptr, int count)
 		// Post-Write-Transaction: Step 11 of 11
 		//
 		// Post YapDatabaseModifiedNotification (if needed)
-		
-		if (notification)
+
+		if (notification && committed)
 		{
 			dispatch_async(dispatch_get_main_queue(), ^{
 				[[NSNotificationCenter defaultCenter] postNotification:notification];

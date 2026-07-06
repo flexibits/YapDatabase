@@ -146,6 +146,7 @@ static NSString *const ext_key_class = @"class";
  * - snapshot : NSNumber with the changeset's snapshot
  */
 - (void)notePendingChangeset:(NSDictionary *)changeset fromConnection:(YapDatabaseConnection *)connection;
+- (void)retractPendingChangeset:(NSDictionary *)changeset fromConnection:(YapDatabaseConnection *)connection;
 
 /**
  * This method is only accessible from within the snapshotQueue.
@@ -334,7 +335,10 @@ static NSString *const ext_key_class = @"class";
 - (void)beginTransaction;
 - (void)beginImmediateTransaction;
 - (void)preCommitReadWriteTransaction;
-- (void)commitTransaction;
+
+/// returns NO if the sqlite COMMIT failed (treat like a rollback)
+- (BOOL)commitTransaction;
+
 - (void)rollbackTransaction;
 
 - (NSDictionary *)extensions;
