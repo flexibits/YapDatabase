@@ -2431,7 +2431,8 @@ static int connectionBusyHandler(void *ptr, int count)
 			// If the two match then our snapshots are in sync.
 			// If they don't then we need to get caught up by processing changesets.
 			
-			dbSnapshot = [self readSnapshotFromDatabase];
+			BOOL dbSnapshotError = NO;
+			dbSnapshot = [self readSnapshotFromDatabase:&dbSnapshotError];
 			if (wal_file == NULL)
 			{
 				wal_file = yap_vfs_last_opened_wal(database->yap_vfs_shim);
@@ -2439,17 +2440,37 @@ static int connectionBusyHandler(void *ptr, int count)
 					wal_file->yap_database_connection = (__bridge void *)self;
 				}
 			}
-			
-			if (snapshot < dbSnapshot)
+
+			if (dbSnapshotError)
+			{
+				// We could not read the authoritative on-disk snapshot, so we cannot verify our
+				// caches are current. Treat this like an undetected external modification:
+				// force a full flush (below), and keep our own snapshot value.
+
+				expectsChangesets = YES;
+				changesets = nil;
+				dbSnapshot = snapshot;
+			}
+			else if (snapshot < dbSnapshot)
 			{
 				// The transaction can see the sqlite commit from another transaction,
 				// and it hasn't processed the changeset(s) yet.
 				// We need to fetch them now.
-				
+
 				expectsChangesets = YES;
 				changesets = [database pendingAndCommittedChangesetsSince:snapshot until:dbSnapshot];
 			}
-			
+			else if (dbSnapshot < snapshot)
+			{
+				// The on-disk snapshot went BACKWARDS relative to us. Normal operation cannot
+				// produce this; it means the database file changed underneath us (restored from
+				// a backup, replaced by another tool) or the snapshot row was lost. Our caches
+				// describe a different file. Adopt the on-disk value and flush everything (below).
+
+				expectsChangesets = YES;
+				changesets = nil;
+			}
+
 			myState->longLivedReadTransaction = (longLivedReadTransaction != nil);
 			myState->sqlLevelSharedReadLock = YES;
 			needsMarkSqlLevelSharedReadLock = NO;
@@ -2774,16 +2795,18 @@ static int connectionBusyHandler(void *ptr, int count)
 			// In case of multiple processes accessing the database,
 			// we can't know for sure so we must make this assumption.
 			
+			BOOL dbSnapshotError = NO;
+
 			if (enableMultiProcessSupport)
 			{
-				dbSnapshot = [self readSnapshotFromDatabase];
+				dbSnapshot = [self readSnapshotFromDatabase:&dbSnapshotError];
 			}
 			else
 			{
 				(void)[self readSnapshotFromDatabase]; // create wal_file
 				dbSnapshot = [database snapshot];
 			}
-			
+
 			if (wal_file == NULL)
 			{
 				wal_file = yap_vfs_last_opened_wal(database->yap_vfs_shim);
@@ -2791,23 +2814,44 @@ static int connectionBusyHandler(void *ptr, int count)
 					wal_file->yap_database_connection = (__bridge void *)self;
 				}
 			}
+
+			if (dbSnapshotError)
+			{
+				// We could not read the authoritative on-disk snapshot, so we cannot verify our
+				// caches are current. Treat this like an undetected external modification:
+				// force a full flush (below), and keep our own snapshot value.
+
+				expectsChangesets = YES;
+				changesets = nil;
+				dbSnapshot = snapshot;
+			}
+			else if (enableMultiProcessSupport && (dbSnapshot < snapshot))
+			{
+				// The on-disk snapshot went BACKWARDS relative to us. Normal operation cannot
+				// produce this; it means the database file changed underneath us (restored from
+				// a backup, replaced by another tool) or the snapshot row was lost. Our caches
+				// describe a different file. Adopt the on-disk value and flush everything (below).
+
+				expectsChangesets = YES;
+				changesets = nil;
+			}
 		}
 		else
 		{
 			// We can just grab the snapshot from YapDatabase's in-memory version.
-			
+
 			dbSnapshot = [database snapshot];
 		}
-		
-		if (snapshot < dbSnapshot)
+
+		if (!expectsChangesets && (snapshot < dbSnapshot))
 		{
 			// The transaction hasn't processed recent changeset(s) yet.
 			// We need to fetch them now.
-			
+
 			expectsChangesets = YES;
 			changesets = [database pendingAndCommittedChangesetsSince:snapshot until:dbSnapshot];
 		}
-		
+
 		myState->lastTransactionSnapshot = dbSnapshot;
 		myState->lastTransactionTime = mach_absolute_time();
 		needsMarkSqlLevelSharedReadLock = NO;
@@ -3532,36 +3576,53 @@ static int connectionBusyHandler(void *ptr, int count)
 **/
 - (uint64_t)readSnapshotFromDatabase
 {
+	return [self readSnapshotFromDatabase:NULL];
+}
+
+- (uint64_t)readSnapshotFromDatabase:(BOOL *)errorPtr
+{
 	sqlite3_stmt *statement = [self yapGetDataForKeyStatement];
-	if (statement == NULL) return 0;
-	
+	if (statement == NULL)
+	{
+		if (errorPtr) *errorPtr = YES;
+		return 0;
+	}
+
 	uint64_t result = 0;
-	
+	BOOL error = NO;
+
 	// SELECT data FROM 'yap2' WHERE extension = ? AND key = ? ;
-	
+
 	int const bind_idx_extension = SQLITE_BIND_START + 0;
 	int const bind_idx_key       = SQLITE_BIND_START + 1;
-	
+
 	const char *extension = "";
 	sqlite3_bind_text(statement, bind_idx_extension, extension, (int)strlen(extension), SQLITE_STATIC);
-	
+
 	const char *key = "snapshot";
 	sqlite3_bind_text(statement, bind_idx_key, key, (int)strlen(key), SQLITE_STATIC);
-	
+
 	int status = sqlite3_step(statement);
 	if (status == SQLITE_ROW)
 	{
 		result = (uint64_t)sqlite3_column_int64(statement, SQLITE_COLUMN_START);
 	}
-	else if (status == SQLITE_ERROR)
+	else if (status != SQLITE_DONE)
 	{
+		// Any error (SQLITE_IOERR, SQLITE_BUSY, SQLITE_CORRUPT, ...), not just SQLITE_ERROR.
+		// In multiprocess mode this SELECT is the authoritative external-modification check,
+		// so callers must know it failed — returning a silent 0 would make them conclude
+		// "nothing changed" and trust stale caches.
+
 		YDBLogError(@"Error executing 'yapGetDataForKeyStatement': %d %s",
 		                                                       status, sqlite3_errmsg(db));
+		error = YES;
 	}
-	
+
 	sqlite3_clear_bindings(statement);
 	sqlite3_reset(statement);
-	
+
+	if (errorPtr) *errorPtr = error;
 	return result;
 }
 
