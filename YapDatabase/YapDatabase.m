@@ -528,8 +528,32 @@ static YDBLogHandler logHandler = nil;
 							YDBLogError(@"Error renaming corrupt database file: (%@ -> %@) %@",
 							            [databasePath lastPathComponent], [newDatabasePath lastPathComponent], error);
 						}
+						else
+						{
+							// The -wal and -shm files MUST go with the main file. If a stale -wal
+							// is left behind, sqlite treats it as a hot journal for the NEW (empty)
+							// database file and replays the OLD database's WAL frames into it —
+							// resurrecting the very content we just declared corrupt.
+
+							for (NSString *suffix in @[@"-wal", @"-shm"])
+							{
+								NSString *sidecarPath = [databasePath stringByAppendingString:suffix];
+								if ([[NSFileManager defaultManager] fileExistsAtPath:sidecarPath])
+								{
+									[[NSFileManager defaultManager] moveItemAtPath: sidecarPath
+									                                        toPath: [newDatabasePath stringByAppendingString:suffix]
+									                                         error: NULL];
+									// If the move fails, fall back to deleting — anything is better
+									// than the new database adopting the old WAL.
+									if ([[NSFileManager defaultManager] fileExistsAtPath:sidecarPath])
+									{
+										[[NSFileManager defaultManager] removeItemAtPath:sidecarPath error:NULL];
+									}
+								}
+							}
+						}
 					}
-					
+
 				} while (i < INT_MAX && !renamed && !failed);
 				
 				if (renamed)
@@ -552,9 +576,15 @@ static YDBLogHandler logHandler = nil;
 				
 				NSError *error = nil;
 				BOOL deleted = [[NSFileManager defaultManager] removeItemAtPath:databasePath error:&error];
-				
+
 				if (deleted)
 				{
+					// The -wal and -shm files MUST go too, or sqlite replays the old WAL
+					// into the fresh database file (see the Rename branch above).
+
+					[[NSFileManager defaultManager] removeItemAtPath:[databasePath stringByAppendingString:@"-wal"] error:NULL];
+					[[NSFileManager defaultManager] removeItemAtPath:[databasePath stringByAppendingString:@"-shm"] error:NULL];
+
 					isNewDatabaseFile = YES;
 					result = openConfigCreate();
 					if (result) {
