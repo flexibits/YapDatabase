@@ -2830,64 +2830,76 @@ NS_INLINE BOOL URLMatchesURL(NSURL *url1, NSURL *url2)
 **/
 - (void)deleteEdgesWithSourceOrDestination:(int64_t)rowid
 {
+	NSMutableArray *deletedEdgeRowids = [NSMutableArray array];
+
 	// Step 1:
 	// First record the edges that are getting deleted
 	{
 		sqlite3_stmt *statement = [parentConnection findEdgesWithNodeStatement];
 		if (statement == NULL) return;
-		
+
 		// SELECT "rowid" FROM "tableName" WHERE "src" = ? OR "dst" = ?;
-		
+
 		int const column_idx_rowid = SQLITE_COLUMN_START;
-		
+
 		int const bind_idx_src = SQLITE_BIND_START + 0;
 		int const bind_idx_dst = SQLITE_BIND_START + 1;
-		
+
 		sqlite3_bind_int64(statement, bind_idx_src, rowid);
 		sqlite3_bind_int64(statement, bind_idx_dst, rowid);
-		
+
 		int status;
 		while ((status = sqlite3_step(statement)) == SQLITE_ROW)
 		{
 			int64_t edgeRowid = sqlite3_column_int64(statement, column_idx_rowid);
-			
+
 			[parentConnection->deletedEdges addObject:@(edgeRowid)];
+			[deletedEdgeRowids addObject:@(edgeRowid)];
 		}
-		
+
 		if (status != SQLITE_DONE)
 		{
 			YDBLogError(@"sqlite_step error: %d %s",
 			            status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
-		
+
 		sqlite3_clear_bindings(statement);
 		sqlite3_reset(statement);
 	}
-	
+
 	// Step 2:
 	// Then actually go ahead and delete the edges
 	{
 		sqlite3_stmt *statement = [parentConnection deleteEdgesWithNodeStatement];
 		if (statement == NULL) return;
-		
+
 		// DELETE FROM "tableName" WHERE "src" = ? OR "dst" = ?;
-		
+
 		int const bind_idx_src = SQLITE_BIND_START + 0;
 		int const bind_idx_dst = SQLITE_BIND_START + 1;
-		
+
 		sqlite3_bind_int64(statement, bind_idx_src, rowid);
 		sqlite3_bind_int64(statement, bind_idx_dst, rowid);
-		
+
 		int status = sqlite3_step(statement);
 		if (status != SQLITE_DONE)
 		{
 			YDBLogError(@"Error executing statement: %d %s",
 						status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
-		
+
 		sqlite3_clear_bindings(statement);
 		sqlite3_reset(statement);
 	}
+
+	// Step 3:
+	// Purge the deleted edges from OUR OWN edgeCache. The deletedEdges changeset only purges
+	// PEER connections' caches; the writer never processes its own changeset. Edge rowids get
+	// reused by sqlite, so a stale entry here later resolves a different (reused) edge rowid to
+	// the old edge's nodeDeleteRules — a wrong-direction cascade can then delete live rows from
+	// the main database.
+
+	[parentConnection->edgeCache removeObjectsForKeys:deletedEdgeRowids];
 }
 
 /**
@@ -2914,10 +2926,17 @@ NS_INLINE BOOL URLMatchesURL(NSURL *url1, NSURL *url2)
 		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
-	
+
 	sqlite3_reset(statement);
-	
+
 	[parentConnection->protocolChanges removeAllObjects];
+
+	// Every protocol edge row was just deleted (and their rowids are now free for reuse),
+	// but nothing records them in deletedEdges, so neither our edgeCache nor any peer's
+	// would be purged. This only runs from populateTable (registration/repopulation);
+	// dropping the whole cache is the safe move.
+
+	[parentConnection->edgeCache removeAllObjects];
 }
 
 /**
