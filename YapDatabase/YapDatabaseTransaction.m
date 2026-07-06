@@ -2865,21 +2865,25 @@
 		{
 			YDBLogError(@"sqlite_step error: %d %s", status, sqlite3_errmsg(connection->db));
 		}
-		
-		sqlite_enum_reset(statement, needsFinalize);
+
+		sqlite3_clear_bindings(statement); // ok: within loop
+		sqlite3_reset(statement);          // ok: within loop
 		FreeYapDatabaseString(&_collection);
-		
+
 		if (!stop && mutation.isMutated)
 		{
+			sqlite_enum_reset(statement, needsFinalize);
 			@throw [self mutationDuringEnumerationException];
 		}
-			
+
 		if (stop)
 		{
 			break;
 		}
-		
+
 	} // end for (NSString *collection in collections)
+
+	sqlite_enum_reset(statement, needsFinalize);
 }
 
 /**
@@ -3171,6 +3175,7 @@
 		
 		if (!stop && mutation.isMutated)
 		{
+			sqlite_enum_reset(statement, needsFinalize);
 			@throw [self mutationDuringEnumerationException];
 		}
 		
@@ -3521,6 +3526,7 @@
 		
 		if (!stop && mutation.isMutated)
 		{
+			sqlite_enum_reset(statement, needsFinalize);
 			@throw [self mutationDuringEnumerationException];
 		}
 		
@@ -3950,6 +3956,7 @@
 		
 		if (!stop && mutation.isMutated)
 		{
+			sqlite_enum_reset(statement, needsFinalize);
 			@throw [self mutationDuringEnumerationException];
 		}
 		
