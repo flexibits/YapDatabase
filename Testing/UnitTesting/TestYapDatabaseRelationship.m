@@ -4405,4 +4405,107 @@
 	XCTAssert([Node_NotifyCount notifyCount] == 1);
 }
 
+// Regression test: deleting a node's edges must purge the WRITER's own edgeCache.
+//
+// deleteEdgesWithSourceOrDestination: (run when a node is deleted) records the deleted edge
+// rowids in the changeset so PEER connections purge their edgeCache, but historically never
+// purged the writer's OWN edgeCache. The edges table is `rowid INTEGER PRIMARY KEY` (no
+// AUTOINCREMENT), so sqlite reuses a freed edge rowid on the next insert. Because an edge INSERT
+// is not broadcast to peers (only deletedEdges/modifiedEdges are), a peer that deleted the old
+// edge keeps a stale edgeCache entry for that rowid. When the reused rowid is later read during a
+// cascade (enumerateExistingEdgesWithDestination: patches only src/dst rowids from disk and keeps
+// the CACHED edge's nodeDeleteRules), the wrong delete rule is applied — the cascade can delete
+// the wrong node, or (as asserted here) fail to delete the node it should have.
+//
+// Two connections are required: conn1 deletes the old edge (its own cache isn't purged), conn2
+// inserts a new edge reusing the freed rowid (not broadcast into conn1's cache), then conn1 reads
+// the stale entry during a cascade.
+- (void)testDeletedNodePurgesWriterEdgeCache_rowidReuseWrongDeleteRule
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+
+	XCTAssertNotNil(database);
+
+	YapDatabaseConnection *conn1 = [database newConnection];
+	YapDatabaseConnection *conn2 = [database newConnection];
+
+	YapDatabaseRelationship *relationship = [[YapDatabaseRelationship alloc] init];
+
+	BOOL registered = [database registerExtension:relationship withName:@"relationship"];
+	XCTAssertTrue(registered, @"Error registering extension");
+
+	// Nodes for the OLD edge (E1) and the NEW edge (E2). Plain string nodes; manual edges.
+	NSString *const oldSrc = @"oldSrc";   // E1 source
+	NSString *const oldDst = @"oldDst";   // E1 destination
+	NSString *const newSrc = @"newSrc";   // E2 source  -- the live node that must be cascade-deleted
+	NSString *const newDst = @"newDst";   // E2 destination -- deleting this must delete newSrc
+
+	// 1. conn1: insert the four nodes and add E1 (oldSrc -> oldDst) with a NON-deleting rule.
+	//    E1 gets edge rowid 1; conn1's edgeCache now holds 1 -> E1 (rules = NotifyIfSourceDeleted).
+	[conn1 readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+
+		[transaction setObject:oldSrc forKey:oldSrc inCollection:nil];
+		[transaction setObject:oldDst forKey:oldDst inCollection:nil];
+		[transaction setObject:newSrc forKey:newSrc inCollection:nil];
+		[transaction setObject:newDst forKey:newDst inCollection:nil];
+
+		YapDatabaseRelationshipEdge *e1 =
+		  [YapDatabaseRelationshipEdge edgeWithName:@"e1"
+		                                  sourceKey:oldSrc
+		                                 collection:nil
+		                             destinationKey:oldDst
+		                                 collection:nil
+		                            nodeDeleteRules:YDB_NotifyIfSourceDeleted];
+
+		[[transaction ext:@"relationship"] addEdge:e1];
+	}];
+
+	// 2. conn1: delete oldSrc. Its edge E1 is deleted via deleteEdgesWithSourceOrDestination:,
+	//    freeing edge rowid 1. E1's rule is non-deleting, so oldDst survives. WITHOUT the fix,
+	//    conn1's edgeCache still holds the phantom 1 -> E1.
+	[conn1 readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+
+		[transaction removeObjectForKey:oldSrc inCollection:nil];
+	}];
+
+	// 3. conn2: add E2 (newSrc -> newDst) with DeleteSourceIfDestinationDeleted. insertEdge reuses
+	//    the freed edge rowid 1. The insert is NOT broadcast into conn1's edgeCache, so conn1's
+	//    phantom entry (1 -> E1, non-deleting rule) is neither updated nor purged.
+	[conn2 readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+
+		YapDatabaseRelationshipEdge *e2 =
+		  [YapDatabaseRelationshipEdge edgeWithName:@"e2"
+		                                  sourceKey:newSrc
+		                                 collection:nil
+		                             destinationKey:newDst
+		                                 collection:nil
+		                            nodeDeleteRules:YDB_DeleteSourceIfDestinationDeleted];
+
+		[[transaction ext:@"relationship"] addEdge:e2];
+	}];
+
+	// 4. conn1: delete newDst. The cascade reads edge rowid 1 for the "destination deleted" rule.
+	//    - Fixed: cache was purged in step 2 -> cache miss -> E2 deserialized from disk ->
+	//      DeleteSourceIfDestinationDeleted -> newSrc is deleted.
+	//    - Buggy: stale hit returns E1 (non-deleting rule) -> newSrc is NOT deleted.
+	[conn1 readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+
+		[transaction removeObjectForKey:newDst inCollection:nil];
+	}];
+
+	// 5. Verify from a FRESH connection (cold cache) so we read what is actually on disk.
+	YapDatabaseConnection *conn3 = [database newConnection];
+	__block id valNewSrc = nil;
+	[conn3 readWithBlock:^(YapDatabaseReadTransaction *transaction) {
+		valNewSrc = [transaction objectForKey:newSrc inCollection:nil];
+	}];
+
+	XCTAssertNil(valNewSrc,
+	    @"newSrc should have been cascade-deleted by E2's DeleteSourceIfDestinationDeleted rule; "
+	    @"a stale edgeCache entry (rowid reuse) applied the OLD edge's non-deleting rule instead");
+}
+
 @end

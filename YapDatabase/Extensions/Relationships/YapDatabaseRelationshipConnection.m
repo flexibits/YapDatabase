@@ -247,18 +247,26 @@
 - (void)postRollbackCleanup
 {
 	YDBLogAutoTrace();
-	
+
 	[protocolChanges removeAllObjects];
 	[manualChanges removeAllObjects];
 	[inserted removeAllObjects];
 	[deletedOrder removeAllObjects];
 	[deletedInfo removeAllObjects];
-	
+
 	reset = NO;
-	
+
 	[deletedEdges removeAllObjects];
 	[modifiedEdges removeAllObjects];
 	[filesToDelete removeAllObjects];
+
+	// The transaction's flush may have inserted/updated edges into edgeCache before the rollback
+	// was decided. Those entries describe edge rows that no longer exist (or hold pre-rollback
+	// nodeDeleteRules). Edge rowids get reused by sqlite, so a stale entry here later resolves a
+	// DIFFERENT edge's rowid to the old edge — wrong delete rules can then cascade-delete live
+	// rows from the main database. Flush it.
+
+	[edgeCache removeAllObjects];
 }
 
 - (NSArray *)internalChangesetKeys
