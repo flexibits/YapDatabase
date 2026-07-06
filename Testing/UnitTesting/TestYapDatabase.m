@@ -1277,4 +1277,63 @@
   XCTAssert(collectionConfig.metadataPolicy == YapDatabasePolicyShare);
 }
 
+// Regression test: rolling back a write transaction must flush the keyCache.
+//
+// setObject: populates keyCache (rowid <-> collectionKey) eagerly, before commit/rollback is decided
+// (YapDatabaseTransaction.m, insertForRowidStatement). On rollback, YapDatabaseConnection flushes
+// objectCache + metadataCache but historically NOT keyCache, so a rolled-back INSERT leaves a phantom
+// rowid <-> collectionKey entry for a row that no longer exists. Because the table is `rowid INTEGER
+// PRIMARY KEY` (no AUTOINCREMENT), that rowid is reused by the next insert. getRowid:forCollectionKey:
+// and collectionKeyForRowid: trust keyCache, so the phantom then resolves the WRONG row -> a write for
+// one collection is persisted into a different collection's row (and reads return the wrong object).
+- (void)testRollbackFlushesKeyCache_rowidReuseCorruption
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+	XCTAssertNotNil(database);
+
+	YapDatabaseConnection *connA = [database newConnection];
+	YapDatabaseConnection *connB = [database newConnection];
+
+	NSString *const collA = @"A";
+	NSString *const collB = @"B";
+	NSString *const key = @"shared-key"; // both siblings share the same key
+
+	// 1. connA inserts (collA,key) -> rowid 1, then ROLLS BACK. keyCache retains a phantom entry
+	//    (rowid 1 <-> (collA,key)) for a row that no longer exists on disk.
+	[connA readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		[transaction setObject:@"objA" forKey:key inCollection:collA];
+		[transaction rollback];
+	}];
+
+	// 2. connB inserts (collB,key). The table is empty again, so sqlite REUSES rowid 1.
+	//    This insert is broadcast to connA only by collectionKey (never by rowid), so connA's
+	//    phantom keyCache entry is never purged.
+	[connB readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		[transaction setObject:@"objB" forKey:key inCollection:collB];
+	}];
+
+	// 3. connA writes (collA,key) again. getRowid:forCollectionKey:(collA,key) trusts the stale
+	//    reverse map and returns rowid 1 -> UPDATE ... WHERE rowid = 1 -> clobbers collB's row.
+	[connA readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		[transaction setObject:@"objA-updated" forKey:key inCollection:collA];
+	}];
+
+	// 4. Verify from a FRESH (cold-cache) connection so we read what is actually on disk.
+	YapDatabaseConnection *connC = [database newConnection];
+	__block id valB;
+	__block id valA;
+	[connC readWithBlock:^(YapDatabaseReadTransaction *transaction) {
+		valB = [transaction objectForKey:key inCollection:collB];
+		valA = [transaction objectForKey:key inCollection:collA];
+	}];
+
+	XCTAssertEqualObjects(valB, @"objB",
+	    @"collB's row was corrupted by a write meant for collA (rollback did not flush keyCache)");
+	XCTAssertEqualObjects(valA, @"objA-updated",
+	    @"the write for collA landed on the wrong row (rollback did not flush keyCache)");
+}
+
 @end
