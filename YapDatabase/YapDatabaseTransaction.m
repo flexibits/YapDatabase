@@ -5738,15 +5738,23 @@
 			}
             
 			status = sqlite3_step(statement);
+
+			sqlite3_finalize(statement);
+			statement = NULL;
+
 			if (status != SQLITE_DONE)
 			{
 				YDBLogError(@"Error executing 'removeKeys:inCollection:' statement (B): %d %s",
 							status, sqlite3_errmsg(connection->db));
+
+				// The DELETE didn't happen. Do NOT update caches/changeset or tell extensions the
+				// rows were removed — that would durably desync extension tables (views/indexes)
+				// and peers from the main table. Abort the remaining batches too.
+
+				FreeYapDatabaseString(&_collection);
+				return;
 			}
-			
-			sqlite3_finalize(statement);
-			statement = NULL;
-			
+
 			connection->hasDiskChanges = YES;
 			[connection->mutationStack markAsMutated];  // mutation during enumeration protection
 			
@@ -6049,20 +6057,42 @@
 			}
 			
 			status = sqlite3_step(statement);
+
+			sqlite3_finalize(statement);
+			statement = NULL;
+
 			if (status != SQLITE_DONE)
 			{
 				YDBLogError(@"Error executing 'removeAllObjectsInCollection:' statement: %d %s",
 				            status, sqlite3_errmsg(connection->db));
+
+				// The DELETE didn't happen. Do NOT update caches/changeset or tell extensions the
+				// rows were removed — that would durably desync extension tables (views/indexes)
+				// and peers from the main table. Abort the remaining batches too.
+
+				FreeYapDatabaseString(&_collection);
+				return;
 			}
-			
-			sqlite3_finalize(statement);
-			statement = NULL;
-			
+
 			connection->hasDiskChanges = YES;
 			[connection->mutationStack markAsMutated];  // mutation during enumeration protection
-			
+
+			// The up-front cache purge (above) can be undone by extension hooks that read rows
+			// belonging to a later batch (repopulating keyCache/objectCache mid-wipe).
+			// Purge again per-batch so no stale rowid <-> collectionKey entry survives the wipe.
+
+			[connection->keyCache removeObjectsForKeys:foundRowids];
+
+			for (NSString *key in foundKeys)
+			{
+				YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+
+				[connection->objectCache removeObjectForKey:cacheKey];
+				[connection->metadataCache removeObjectForKey:cacheKey];
+			}
+
 			[connection->removedRowids addObjectsFromArray:foundRowids];
-			
+
 			for (YapDatabaseExtensionTransaction *extTransaction in [self orderedExtensions])
 			{
 				[extTransaction didRemoveObjectsForKeys:foundKeys
@@ -6092,13 +6122,20 @@
     }
 	
 	int status = sqlite3_step(statement);
+
+	sqlite3_reset(statement);
+
 	if (status != SQLITE_DONE)
 	{
 		YDBLogError(@"Error executing 'removeAllStatement': %d %s", status, sqlite3_errmsg(connection->db));
+
+		// The DELETE didn't happen — the main table still holds every row. Broadcasting
+		// allKeysRemoved / telling extensions to truncate their tables here would durably
+		// desync extension tables and peers from the main table. Bail out instead.
+
+		return;
 	}
-	
-	sqlite3_reset(statement);
-	
+
 	connection->hasDiskChanges = YES;
 	[connection->mutationStack markAsMutated];  // mutation during enumeration protection
 	
