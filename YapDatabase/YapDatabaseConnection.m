@@ -2934,8 +2934,12 @@ static int connectionBusyHandler(void *ptr, int count)
  * This method must be invoked from within the connectionQueue.
  * This method must be invoked from within the database.writeQueue.
 **/
-- (void)postReadWriteTransaction:(YapDatabaseReadWriteTransaction *)transaction
+- (BOOL)postReadWriteTransaction:(YapDatabaseReadWriteTransaction *)transaction
 {
+	// Whether the sqlite COMMIT succeeded. Stays NO for a deliberate rollback and for a failed
+	// commit; callers needing the durable outcome (e.g. registerExtension:) consult the return value.
+	BOOL committed = NO;
+
 	if (transaction->rollback)
 	{
 		YDBLogVerbose(@"YapDatabaseConnection(%p) rollback read-write transaction", self);
@@ -3185,7 +3189,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		// from the database. If it doesn't match what we expect, then we know we've run into the race condition,
 		// and we make the read-only transaction back out and try again.
 		
-		BOOL committed = [transaction commitTransaction];
+		committed = [transaction commitTransaction];
 		if (!committed)
 		{
 			// The sqlite COMMIT failed (e.g. disk full / I/O error while appending to the WAL),
@@ -3345,10 +3349,12 @@ static int connectionBusyHandler(void *ptr, int count)
 		removedRowids = nil;
 	
 	[mutationStack clear];
-	
+
 	// Drop IsOnConnectionQueueKey flag from writeQueue since we're exiting writeQueue.
-	
+
 	dispatch_queue_set_specific(database->writeQueue, IsOnConnectionQueueKey, NULL, NULL);
+
+	return committed;
 }
 
 /**
@@ -5270,16 +5276,33 @@ static int connectionBusyHandler(void *ptr, int count)
 		else
 		{
 			// Registration failed.
-			
+
 			[transaction rollback];
 		}
-		
-		[self postReadWriteTransaction:transaction];
+
+		BOOL committed = [self postReadWriteTransaction:transaction];
+
+		if (result && !committed)
+		{
+			// createIfNeeded succeeded, but the sqlite COMMIT that would have persisted the
+			// extension's tables failed (and was rolled back). The in-memory registration
+			// bookkeeping was already populated above, so leaving it would report a phantom
+			// registration: this connection would believe the extension exists while its tables do
+			// not, and no peer ever learns of it (the changeset was retracted). Undo the bookkeeping
+			// and report failure. The database-level registeredExtensions never saw it.
+
+			result = NO;
+
+			[self didUnregisterExtensionWithName:extensionName];
+			[self removeRegisteredExtensionConnectionWithName:extensionName];
+			[transaction removeRegisteredExtensionTransactionWithName:extensionName];
+		}
+
 		registeredExtensionsChanged = NO;
-		
+
 	#pragma clang diagnostic pop
 	}});
-	
+
 	return result;
 }
 
