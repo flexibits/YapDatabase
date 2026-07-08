@@ -4262,13 +4262,17 @@ static int connectionBusyHandler(void *ptr, int count)
 		
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
-		
+
+		// Read the default policy once (it takes database's configLock) rather than
+		// re-fetching it per key inside the loop.
+		NSNumber *defaultObjectPolicy = [database getDefaultObjectPolicy];
+
 		[changeset_objectChanges enumerateKeysAndObjectsUsingBlock:^(id key, id newObject, BOOL __unused *stop) {
 		#pragma clang diagnostic push
 		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-		
+
 			__unsafe_unretained YapCollectionKey *cacheKey = (YapCollectionKey *)key;
-			
+
 			if ([objectCache containsKey:cacheKey])
 			{
 				if (newObject == yapNull)
@@ -4278,7 +4282,7 @@ static int connectionBusyHandler(void *ptr, int count)
 				else if (newObject != yapTouch)
 				{
 					YapDatabasePolicy objectPolicy = YapDatabasePolicyContainment;
-          NSNumber *op = objectPolicies[cacheKey.collection] ?: [database getDefaultObjectPolicy];
+          NSNumber *op = objectPolicies[cacheKey.collection] ?: defaultObjectPolicy;
 					if (op) {
 						objectPolicy = (YapDatabasePolicy)[op integerValue];
 					}
@@ -4332,14 +4336,18 @@ static int connectionBusyHandler(void *ptr, int count)
 		}];
 		
 		[objectCache removeObjectsForKeys:keysToRemove];
-		
+
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
-		
+
+		// Read the default policy once (it takes database's configLock) rather than
+		// re-fetching it per key inside the loop.
+		NSNumber *defaultObjectPolicy = [database getDefaultObjectPolicy];
+
 		for (YapCollectionKey *cacheKey in keysToUpdate)
 		{
 			id newObject = [changeset_objectChanges objectForKey:cacheKey];
-			
+
 			if (newObject == yapNull)
 			{
 				[objectCache removeObjectForKey:cacheKey];
@@ -4347,7 +4355,7 @@ static int connectionBusyHandler(void *ptr, int count)
 			else if (newObject != yapTouch)
 			{
 				YapDatabasePolicy objectPolicy = YapDatabasePolicyContainment;
-				NSNumber *op = objectPolicies[cacheKey.collection] ?: [database getDefaultObjectPolicy];
+				NSNumber *op = objectPolicies[cacheKey.collection] ?: defaultObjectPolicy;
 				if (op) {
 					objectPolicy = (YapDatabasePolicy)[op integerValue];
 				}
@@ -4384,13 +4392,17 @@ static int connectionBusyHandler(void *ptr, int count)
 		
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
-		
+
+		// Read the default policy once (it takes database's configLock) rather than
+		// re-fetching it per key inside the loop.
+		NSNumber *defaultMetadataPolicy = [database getDefaultMetadataPolicy];
+
 		[changeset_metadataChanges enumerateKeysAndObjectsUsingBlock:^(id key, id newMetadata, BOOL __unused *stop) {
 		#pragma clang diagnostic push
 		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
-			
+
 			__unsafe_unretained YapCollectionKey *cacheKey = (YapCollectionKey *)key;
-			
+
 			if ([metadataCache containsKey:cacheKey])
 			{
 				if (newMetadata == yapNull)
@@ -4400,7 +4412,7 @@ static int connectionBusyHandler(void *ptr, int count)
 				else if (newMetadata != yapTouch)
 				{
 					YapDatabasePolicy metadataPolicy = YapDatabasePolicyContainment;
-					NSNumber *mp = metadataPolicies[cacheKey.collection] ?: [database getDefaultMetadataPolicy];
+					NSNumber *mp = metadataPolicies[cacheKey.collection] ?: defaultMetadataPolicy;
 					if (mp) {
 						metadataPolicy = (YapDatabasePolicy)[mp integerValue];
 					}
@@ -4454,14 +4466,18 @@ static int connectionBusyHandler(void *ptr, int count)
 		}];
 		
 		[metadataCache removeObjectsForKeys:keysToRemove];
-		
+
 		id yapNull = [YapNull null];    // value == yapNull  : setPrimitive or containment policy
 		id yapTouch = [YapTouch touch]; // value == yapTouch : touchObjectForKey: was used
-		
+
+		// Read the default policy once (it takes database's configLock) rather than
+		// re-fetching it per key inside the loop.
+		NSNumber *defaultMetadataPolicy = [database getDefaultMetadataPolicy];
+
 		for (YapCollectionKey *cacheKey in keysToUpdate)
 		{
 			id newMetadata = [changeset_metadataChanges objectForKey:cacheKey];
-			
+
 			if (newMetadata == yapNull)
 			{
 				[metadataCache removeObjectForKey:cacheKey];
@@ -4469,7 +4485,7 @@ static int connectionBusyHandler(void *ptr, int count)
 			else if (newMetadata != yapTouch)
 			{
 				YapDatabasePolicy metadataPolicy = YapDatabasePolicyContainment;
-				NSNumber *mp = metadataPolicies[cacheKey.collection] ?: [database getDefaultMetadataPolicy];
+				NSNumber *mp = metadataPolicies[cacheKey.collection] ?: defaultMetadataPolicy;
 				if (mp) {
 					metadataPolicy = (YapDatabasePolicy)[mp integerValue];
 				}
