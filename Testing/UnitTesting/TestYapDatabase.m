@@ -6,6 +6,8 @@
 #import <YapDatabase/YapDatabase.h>
 #import <YapDatabase/YapProxyObject.h>
 #import <YapDatabase/YapDatabasePrivate.h>
+#import <YapDatabase/YapDatabaseView.h>
+#import <YapDatabase/YapDatabaseAutoView.h>
 
 #if PODFILE_USE_FRAMEWORKS
 // Works with `use_frameworks`, but not with `use_modular_headers`
@@ -14,6 +16,19 @@
 // Works with `use_modular_headers`, but not with `use_frameworks`
 #import "YapProxyObjectPrivate.h"
 #endif
+
+// Returning non-zero from a sqlite commit hook converts the pending COMMIT into a ROLLBACK and makes
+// the COMMIT step return an error — a deterministic way to exercise the failed-commit code paths.
+static int YDBTestFailCommitHook(void *context)
+{
+	return 1;
+}
+
+// The registration connection is private; declaring the accessor lets the failed-commit test reach
+// its sqlite handle to install the commit hook above.
+@interface YapDatabase (YDBTestRegistrationConnection)
+- (YapDatabaseConnection *)registrationConnection;
+@end
 
 @interface TestYapDatabase : XCTestCase
 @end
@@ -1463,6 +1478,86 @@
 		XCTAssertFalse([transaction hasObjectForKey:@"sentinel" inCollection:sentinelCollection],
 		    @"the transaction broadcast a phantom removal and committed instead of rolling back");
 	}];
+}
+
+// Committing a memory-table transaction and then rolling it back — exactly what
+// happens when preCommitReadWriteTransaction commits the memory tables and the sqlite COMMIT then
+// fails — must remove the (snapshot, changedKeys) entry that the commit pushed onto the table's
+// history. Otherwise the entry leaks, and a retry that reuses the same snapshot number pushes a
+// duplicate, breaking the history array's ordered-unique invariant (and asyncCheckpoint never drains
+// it once the snapshot regresses).
+- (void)testMemoryTableRollbackAfterCommitDoesNotLeakHistory
+{
+	YapMemoryTable *table = [[YapMemoryTable alloc] initWithKeyClass:[NSString class]];
+
+	YapMemoryTableTransaction *txn = [table newReadWriteTransactionWithSnapshot:1];
+	[txn setObject:@"value" forKey:@"key"];
+	[txn commit];    // preCommitReadWriteTransaction commits the memory tables (pushes history)
+	[txn rollback];  // commitTransaction rolls them back after the sqlite COMMIT failed
+
+	XCTAssertEqual([(NSArray *)[table valueForKey:@"snapshots"] count], (NSUInteger)0,
+	    @"rollback after commit must remove the pushed history entry (snapshots)");
+	XCTAssertEqual([(NSArray *)[table valueForKey:@"changes"] count], (NSUInteger)0,
+	    @"rollback after commit must remove the pushed history entry (changes)");
+
+	// A retry that reuses the same snapshot number (the enclosing connection did snapshot--) must
+	// leave exactly one history entry, not a duplicate.
+	YapMemoryTableTransaction *retry = [table newReadWriteTransactionWithSnapshot:1];
+	[retry setObject:@"value2" forKey:@"key"];
+	[retry commit];
+
+	XCTAssertEqual([(NSArray *)[table valueForKey:@"snapshots"] count], (NSUInteger)1,
+	    @"retry at the same snapshot must not create a duplicate history entry");
+}
+
+// registerExtension: must return NO when the sqlite COMMIT that would persist
+// the extension fails, and must not leave the extension half-registered. Previously it returned the
+// result of createIfNeeded (YES) regardless of the commit outcome, leaving split-brain state: the
+// connection believed the extension existed while its tables had been rolled back, and no peer ever
+// learned of it.
+//
+// The registration COMMIT is forced to fail with a sqlite commit hook installed on the (primed)
+// registration connection.
+- (void)testRegisterExtensionReturnsNOWhenCommitFails
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+	XCTAssertNotNil(database);
+
+	YapDatabaseViewGrouping *grouping = [YapDatabaseViewGrouping withKeyBlock:
+	    ^NSString *(YapDatabaseReadTransaction *transaction, NSString *collection, NSString *key){
+		return @"";
+	}];
+	YapDatabaseViewSorting *sorting = [YapDatabaseViewSorting withObjectBlock:
+		^(YapDatabaseReadTransaction *transaction, NSString *group,
+		    NSString *collection1, NSString *key1, id obj1,
+		    NSString *collection2, NSString *key2, id obj2)
+	{
+		return NSOrderedSame;
+	}];
+
+	// Prime the lazily-created registration connection with a successful registration.
+	YapDatabaseAutoView *viewA =
+	  [[YapDatabaseAutoView alloc] initWithGrouping:grouping sorting:sorting versionTag:@"1" options:nil];
+	XCTAssertTrue([database registerExtension:viewA withName:@"viewA"],
+	    @"priming registration should succeed");
+
+	// Make the NEXT registration's COMMIT fail (createIfNeeded still succeeds).
+	YapDatabaseConnection *regConn = [database registrationConnection];
+	sqlite3_commit_hook(regConn->db, YDBTestFailCommitHook, NULL);
+
+	YapDatabaseAutoView *viewB =
+	  [[YapDatabaseAutoView alloc] initWithGrouping:grouping sorting:sorting versionTag:@"1" options:nil];
+	BOOL didRegisterB = [database registerExtension:viewB withName:@"viewB"];
+
+	sqlite3_commit_hook(regConn->db, NULL, NULL); // remove the hook
+
+	XCTAssertFalse(didRegisterB,
+	    @"registerExtension: must return NO when the commit fails");
+	XCTAssertNil([[database registeredExtensions] objectForKey:@"viewB"],
+	    @"a failed-commit registration must not leave the extension registered");
 }
 
 @end

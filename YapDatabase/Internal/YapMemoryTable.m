@@ -58,10 +58,11 @@
 @public
 	
 	__unsafe_unretained YapMemoryTable *table;
-	
+
 	uint64_t snapshot;
 	BOOL isReadWriteTransaction;
-	
+	BOOL didCommit;
+
 	NSMutableSet *changedKeys;
 }
 @end
@@ -643,6 +644,8 @@
 			[table->changes addObject:changedKeys];
 		}
 		[table->lock unlock];
+
+		didCommit = YES;
 	}
 }
 
@@ -650,6 +653,35 @@
 {
 	if (isReadWriteTransaction && [changedKeys count] > 0)
 	{
+		if (didCommit)
+		{
+			// This transaction was already committed (which pushed a (snapshot, changedKeys) entry
+			// onto the table's history) before something forced the enclosing database transaction
+			// to roll back — e.g. the sqlite COMMIT failed after preCommitReadWriteTransaction had
+			// committed the memory tables. asyncRollback (below) reverts the stored values, but the
+			// history entry must ALSO be removed. Otherwise it leaks (asyncCheckpoint drains from
+			// the front and never reaches it once the snapshot regresses) and, after the caller's
+			// snapshot-- + retry, the same snapshot number is pushed again — breaking the array's
+			// ordered-unique invariant.
+			//
+			// Only this connection's writer touches these history arrays, and it does so serially,
+			// so our entry is still the last one; asyncCheckpoint only ever removes from the front.
+
+			[table->lock lock];
+			{
+				NSUInteger count = [table->snapshots count];
+				if (count > 0 &&
+				    [[table->snapshots objectAtIndex:(count - 1)] unsignedLongLongValue] == snapshot)
+				{
+					[table->snapshots removeObjectAtIndex:(count - 1)];
+					[table->changes removeObjectAtIndex:(count - 1)];
+				}
+			}
+			[table->lock unlock];
+
+			didCommit = NO;
+		}
+
 		[table asyncRollback:snapshot withChanges:changedKeys];
 	}
 }
