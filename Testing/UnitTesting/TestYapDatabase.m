@@ -1560,4 +1560,55 @@ static int YDBTestFailCommitHook(void *context)
 	    @"a failed-commit registration must not leave the extension registered");
 }
 
+// Regression test (#4): in single-process mode a touch-only/in-memory commit bumps the connection's
+// in-memory snapshot without writing the on-disk (yap2) snapshot row, so the on-disk snapshot
+// legitimately lags. preReadTransaction's "database replaced underneath us" branch must not fire in
+// that case (it's guarded by enableMultiProcessSupport). Previously it did, so any read that took
+// the disk-read path — e.g. beginLongLivedReadTransaction — flushed all caches and regressed the
+// connection's snapshot on every begin.
+- (void)testTouchThenLongLivedReadDoesNotRegressSnapshot
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+	XCTAssertNotNil(database); // single-process mode (enableMultiProcessSupport defaults to NO)
+
+	YapDatabaseConnection *connection = [database newConnection];
+
+	NSString *const collection = @"docs";
+	NSString *const key = @"k";
+
+	// A real write (advances both the in-memory and on-disk snapshot).
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		[transaction setObject:@"v" forKey:key inCollection:collection];
+	}];
+
+	// A touch-only commit: bumps the in-memory snapshot but writes nothing to disk, so the on-disk
+	// snapshot now lags the connection's in-memory snapshot.
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		[transaction touchObjectForKey:key inCollection:collection];
+	}];
+
+	uint64_t snapshotBefore = connection.snapshot;
+
+	// Begin a long-lived read. This forces preReadTransaction down the disk-read path, where it
+	// reads the (lagging) on-disk snapshot. It must NOT conclude the file was swapped.
+	[connection beginLongLivedReadTransaction];
+
+	uint64_t snapshotAfter = connection.snapshot;
+
+	__block id value = nil;
+	[connection readWithBlock:^(YapDatabaseReadTransaction *transaction) {
+		value = [transaction objectForKey:key inCollection:collection];
+	}];
+
+	[connection endLongLivedReadTransaction];
+
+	XCTAssertEqual(snapshotAfter, snapshotBefore,
+	    @"beginning a read after a touch-only commit must not regress the connection's snapshot");
+	XCTAssertEqualObjects(value, @"v",
+	    @"data must remain readable and correct");
+}
+
 @end

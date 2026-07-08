@@ -2460,12 +2460,18 @@ static int connectionBusyHandler(void *ptr, int count)
 				expectsChangesets = YES;
 				changesets = [database pendingAndCommittedChangesetsSince:snapshot until:dbSnapshot];
 			}
-			else if (dbSnapshot < snapshot)
+			else if (enableMultiProcessSupport && (dbSnapshot < snapshot))
 			{
 				// The on-disk snapshot went BACKWARDS relative to us. Normal operation cannot
 				// produce this; it means the database file changed underneath us (restored from
 				// a backup, replaced by another tool) or the snapshot row was lost. Our caches
 				// describe a different file. Adopt the on-disk value and flush everything (below).
+				//
+				// Guarded by enableMultiProcessSupport (mirroring preWriteTransaction): in single-
+				// process mode the on-disk snapshot legitimately lags our in-memory one after a
+				// touch-only/in-memory commit (which bumps the memory snapshot without writing the
+				// yap2 snapshot row). Treating that as a file swap here would flush every cache and
+				// regress the snapshot on each long-lived / cold-wal read begin — pure thrash.
 
 				expectsChangesets = YES;
 				changesets = nil;
