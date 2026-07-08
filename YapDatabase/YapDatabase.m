@@ -538,17 +538,16 @@ static YDBLogHandler logHandler = nil;
 							for (NSString *suffix in @[@"-wal", @"-shm"])
 							{
 								NSString *sidecarPath = [databasePath stringByAppendingString:suffix];
-								if ([[NSFileManager defaultManager] fileExistsAtPath:sidecarPath])
+
+								// Rely on the move's own return value rather than a separate
+								// fileExistsAtPath probe (which races). If the move fails — including
+								// because the sidecar doesn't exist — fall back to deleting, since
+								// anything is better than the new database adopting the old WAL.
+								if (![[NSFileManager defaultManager] moveItemAtPath: sidecarPath
+								                                             toPath: [newDatabasePath stringByAppendingString:suffix]
+								                                              error: NULL])
 								{
-									[[NSFileManager defaultManager] moveItemAtPath: sidecarPath
-									                                        toPath: [newDatabasePath stringByAppendingString:suffix]
-									                                         error: NULL];
-									// If the move fails, fall back to deleting — anything is better
-									// than the new database adopting the old WAL.
-									if ([[NSFileManager defaultManager] fileExistsAtPath:sidecarPath])
-									{
-										[[NSFileManager defaultManager] removeItemAtPath:sidecarPath error:NULL];
-									}
+									[[NSFileManager defaultManager] removeItemAtPath:sidecarPath error:NULL];
 								}
 							}
 						}
