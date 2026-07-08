@@ -5739,7 +5739,12 @@
 			{
 				YDBLogError(@"Error creating 'removeKeys:inCollection:' statement (B): %d %s",
 							status, sqlite3_errmsg(connection->db));
-				
+
+				// Earlier batches may already have been removed (caches + didRemove hooks). Bailing
+				// out now would commit a partial removal. Roll the whole transaction back instead.
+
+				rollback = YES;
+
 				FreeYapDatabaseString(&_collection);
 				return;
 			}
@@ -5768,9 +5773,14 @@
 				YDBLogError(@"Error executing 'removeKeys:inCollection:' statement (B): %d %s",
 							status, sqlite3_errmsg(connection->db));
 
-				// The DELETE didn't happen. Do NOT update caches/changeset or tell extensions the
-				// rows were removed — that would durably desync extension tables (views/indexes)
-				// and peers from the main table. Abort the remaining batches too.
+				// The DELETE didn't happen, but we already invoked willRemoveObjectsForKeys: on
+				// every extension for this batch (and may have fully removed earlier batches).
+				// Silently returning would leave will/did hooks unpaired, the rows on disk, and no
+				// error surfaced — yet the transaction would still commit its OTHER changes.
+				// Treat a failed bulk DELETE like a failed COMMIT: roll the whole transaction back
+				// so nothing is committed and extensions are told via didRollbackTransaction.
+
+				rollback = YES;
 
 				FreeYapDatabaseString(&_collection);
 				return;
@@ -5925,29 +5935,44 @@
 	if ([[self extensions] count] == 0)
 	{
 		sqlite3_stmt *statement = [connection removeCollectionStatement];
-		if (statement == NULL) return;
-	
+		if (statement == NULL)
+		{
+			// removedCollections was already recorded above; committing a phantom collection-removal
+			// (for rows still on disk) must not happen. Roll the whole transaction back.
+
+			rollback = YES;
+			return;
+		}
+
 		// DELETE FROM "database2" WHERE "collection" = ?;
-		
+
 		int const bind_idx_collection = SQLITE_BIND_START;
-		
+
 		YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
-		
+
 		int status = sqlite3_step(statement);
+
+		sqlite3_clear_bindings(statement);
+		sqlite3_reset(statement);
+		FreeYapDatabaseString(&_collection);
+
 		if (status != SQLITE_DONE)
 		{
 			YDBLogError(@"Error executing 'removeCollectionStatement': %d %s, collection(%@)",
 			                                                       status, sqlite3_errmsg(connection->db), collection);
+
+			// The DELETE failed, but removedCollections was already recorded above. Committing would
+			// broadcast a phantom collection-removal for rows still on disk. Roll the transaction
+			// back instead. (Previously this path logged the error but committed anyway.)
+
+			rollback = YES;
+			return;
 		}
-		
-		sqlite3_clear_bindings(statement);
-		sqlite3_reset(statement);
-		FreeYapDatabaseString(&_collection);
-		
+
 		connection->hasDiskChanges = YES;
 		[connection->mutationStack markAsMutated];  // mutation during enumeration protection
-		
+
 		return;
 	} // end shortcut
 	
@@ -6058,7 +6083,12 @@
 			{
 				YDBLogError(@"Error creating 'removeAllObjectsInCollection:' statement: %d %s",
 				            status, sqlite3_errmsg(connection->db));
-				
+
+				// removedCollections was already recorded before the loop (see above). Bailing out
+				// now would commit a phantom collection-removal. Roll the transaction back instead.
+
+				rollback = YES;
+
 				FreeYapDatabaseString(&_collection);
 				return;
 			}
@@ -6087,9 +6117,13 @@
 				YDBLogError(@"Error executing 'removeAllObjectsInCollection:' statement: %d %s",
 				            status, sqlite3_errmsg(connection->db));
 
-				// The DELETE didn't happen. Do NOT update caches/changeset or tell extensions the
-				// rows were removed — that would durably desync extension tables (views/indexes)
-				// and peers from the main table. Abort the remaining batches too.
+				// The DELETE didn't happen, but this method already added the collection to the
+				// changeset's removedCollections (and stripped its pending per-key changes) before
+				// the loop. Committing would broadcast a phantom collection-removal for rows still
+				// on disk, desyncing extension tables and peers. Treat a failed bulk DELETE like a
+				// failed COMMIT: roll the whole transaction back so nothing is committed.
+
+				rollback = YES;
 
 				FreeYapDatabaseString(&_collection);
 				return;
