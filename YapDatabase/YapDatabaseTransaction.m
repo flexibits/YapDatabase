@@ -183,35 +183,51 @@
 		sqlite3_reset(statement);
 	}
 
-	if (!committed && isReadWriteTransaction && !sqlite3_get_autocommit(connection->db))
+	if (!committed && isReadWriteTransaction)
 	{
-		// sqlite did NOT auto-rollback; the transaction is still open. This covers both a failed
-		// COMMIT step (above) and a NULL commitTransactionStatement (prepare failed, e.g.
-		// SQLITE_NOMEM after a memory warning flushed the cached statements).
-		// Roll it back explicitly so the outcome is deterministic
-		// (a zombie transaction would swallow every subsequent BEGIN/COMMIT).
-
-		sqlite3_stmt *rbStatement = [connection rollbackTransactionStatement];
-		if (rbStatement)
+		if (sqlite3_get_autocommit(connection->db))
 		{
-			int rbStatus = sqlite3_step(rbStatement);
-			if (rbStatus != SQLITE_DONE)
-			{
-				YDBLogError(@"Couldn't rollback failed commit: %d %s",
-				            rbStatus, sqlite3_errmsg(connection->db));
-			}
-			sqlite3_reset(rbStatement);
+			// sqlite already rolled the transaction back itself — either the failed COMMIT above, or
+			// an auto-rollback triggered by an error on an EARLIER statement (SQLite may do this for
+			// SQLITE_FULL / SQLITE_IOERR / SQLITE_NOMEM; see the docs on errors within a transaction).
+			// In the latter case, statements after the error ran in autocommit mode and are durable;
+			// we can't undo those here, but treating this as a failed commit (postReadWriteTransaction
+			// flushes + retracts the changeset) plus the changeset-gap recovery in
+			// pendingAndCommittedChangesetsSince keeps caches consistent with what's actually on disk.
+
+			YDBLogWarn(@"commitTransaction: transaction is no longer active (sqlite auto-rolled-back);"
+			           @" treating as a failed commit.");
 		}
 		else
 		{
-			// If preparing COMMIT failed with NOMEM, preparing ROLLBACK likely fails too.
-			// sqlite3_exec is a last-ditch attempt that doesn't depend on the statement cache.
+			// sqlite did NOT auto-rollback; the transaction is still open. This covers both a failed
+			// COMMIT step (above) and a NULL commitTransactionStatement (prepare failed, e.g.
+			// SQLITE_NOMEM after a memory warning flushed the cached statements).
+			// Roll it back explicitly so the outcome is deterministic
+			// (a zombie transaction would swallow every subsequent BEGIN/COMMIT).
 
-			int rbStatus = sqlite3_exec(connection->db, "ROLLBACK TRANSACTION;", NULL, NULL, NULL);
-			if (rbStatus != SQLITE_OK)
+			sqlite3_stmt *rbStatement = [connection rollbackTransactionStatement];
+			if (rbStatement)
 			{
-				YDBLogError(@"Couldn't rollback failed commit (exec): %d %s",
-				            rbStatus, sqlite3_errmsg(connection->db));
+				int rbStatus = sqlite3_step(rbStatement);
+				if (rbStatus != SQLITE_DONE)
+				{
+					YDBLogError(@"Couldn't rollback failed commit: %d %s",
+					            rbStatus, sqlite3_errmsg(connection->db));
+				}
+				sqlite3_reset(rbStatement);
+			}
+			else
+			{
+				// If preparing COMMIT failed with NOMEM, preparing ROLLBACK likely fails too.
+				// sqlite3_exec is a last-ditch attempt that doesn't depend on the statement cache.
+
+				int rbStatus = sqlite3_exec(connection->db, "ROLLBACK TRANSACTION;", NULL, NULL, NULL);
+				if (rbStatus != SQLITE_OK)
+				{
+					YDBLogError(@"Couldn't rollback failed commit (exec): %d %s",
+					            rbStatus, sqlite3_errmsg(connection->db));
+				}
 			}
 		}
 	}
