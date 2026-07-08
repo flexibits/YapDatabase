@@ -1336,4 +1336,133 @@
 	    @"the write for collA landed on the wrong row (rollback did not flush keyCache)");
 }
 
+// Regression test: a bulk DELETE that fails mid-transaction must roll the whole transaction back,
+// not silently commit its other changes.
+//
+// removeObjectsForKeys:inCollection: invokes willRemoveObjectsForKeys: on every extension BEFORE
+// stepping the DELETE. If the DELETE step fails, the old code just returned: the will-hook had
+// already fired (with no matching did-hook), the rows were left on disk, no error was surfaced, and
+// the transaction went on to COMMIT its unrelated writes. The fix treats a failed bulk DELETE like
+// a failed COMMIT -> the entire transaction is rolled back.
+//
+// The DELETE is forced to fail deterministically by toggling `PRAGMA query_only` ON around the call
+// (a write step then returns SQLITE_READONLY), and OFF again before the block ends.
+- (void)testFailedBulkDeleteRollsBackTransaction_removeObjectsForKeys
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+	XCTAssertNotNil(database);
+
+	YapDatabaseConnection *connection = [database newConnection];
+
+	NSString *const collection = @"docs";
+	NSString *const sentinelCollection = @"unrelated";
+	NSArray *const keys = @[@"k1", @"k2", @"k3", @"k4"]; // >1 forces the bulk (non single-key) path
+
+	// Seed the collection in a committed transaction.
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		for (NSString *key in keys) {
+			[transaction setObject:key forKey:key inCollection:collection];
+		}
+	}];
+
+	__block BOOL rollbackWasSet = NO;
+
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+
+		// An unrelated write in the SAME transaction. If the transaction is (wrongly) allowed to
+		// commit, this sentinel survives; if it is correctly rolled back, it disappears.
+		[transaction setObject:@"sentinel" forKey:@"sentinel" inCollection:sentinelCollection];
+
+		// Make the next write step fail with SQLITE_READONLY.
+		int rc = sqlite3_exec(connection->db, "PRAGMA query_only=ON;", NULL, NULL, NULL);
+		XCTAssertEqual(rc, SQLITE_OK, @"failed to enable query_only");
+
+		[transaction removeObjectsForKeys:keys inCollection:collection];
+
+		rollbackWasSet = transaction->rollback;
+
+		// Restore normal mode so the transaction machinery (rollback) runs unhindered.
+		rc = sqlite3_exec(connection->db, "PRAGMA query_only=OFF;", NULL, NULL, NULL);
+		XCTAssertEqual(rc, SQLITE_OK, @"failed to disable query_only");
+	}];
+
+	XCTAssertTrue(rollbackWasSet,
+	    @"a failed bulk DELETE should mark the transaction for rollback");
+
+	// Read from a FRESH connection so we observe what is actually on disk (cold caches).
+	YapDatabaseConnection *verify = [database newConnection];
+	[verify readWithBlock:^(YapDatabaseReadTransaction *transaction) {
+
+		XCTAssertEqual([transaction numberOfKeysInCollection:collection], (NSUInteger)[keys count],
+		    @"the failed DELETE must not have removed any rows");
+		for (NSString *key in keys) {
+			XCTAssertEqualObjects([transaction objectForKey:key inCollection:collection], key,
+			    @"row %@ should be untouched", key);
+		}
+
+		XCTAssertFalse([transaction hasObjectForKey:@"sentinel" inCollection:sentinelCollection],
+		    @"the transaction silently committed its other writes instead of rolling back");
+	}];
+}
+
+// Regression test: removeAllObjectsInCollection: takes a no-extensions "shortcut" that adds the
+// collection to the changeset's removedCollections BEFORE stepping the DELETE. If that DELETE
+// failed, the old shortcut logged the error but committed anyway -> peers received a phantom
+// collection-removal for rows still on disk. The fix rolls the transaction back instead.
+//
+// (This exercises the shortcut path specifically: no extensions are registered.)
+- (void)testFailedRemoveAllInCollectionRollsBack_shortcutPath
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+	XCTAssertNotNil(database);
+
+	YapDatabaseConnection *connection = [database newConnection];
+
+	NSString *const collection = @"docs";
+	NSString *const sentinelCollection = @"unrelated";
+	NSArray *const keys = @[@"k1", @"k2", @"k3"];
+
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		for (NSString *key in keys) {
+			[transaction setObject:key forKey:key inCollection:collection];
+		}
+	}];
+
+	__block BOOL rollbackWasSet = NO;
+
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+
+		[transaction setObject:@"sentinel" forKey:@"sentinel" inCollection:sentinelCollection];
+
+		int rc = sqlite3_exec(connection->db, "PRAGMA query_only=ON;", NULL, NULL, NULL);
+		XCTAssertEqual(rc, SQLITE_OK, @"failed to enable query_only");
+
+		[transaction removeAllObjectsInCollection:collection];
+
+		rollbackWasSet = transaction->rollback;
+
+		rc = sqlite3_exec(connection->db, "PRAGMA query_only=OFF;", NULL, NULL, NULL);
+		XCTAssertEqual(rc, SQLITE_OK, @"failed to disable query_only");
+	}];
+
+	XCTAssertTrue(rollbackWasSet,
+	    @"a failed removeAllObjectsInCollection: should mark the transaction for rollback");
+
+	YapDatabaseConnection *verify = [database newConnection];
+	[verify readWithBlock:^(YapDatabaseReadTransaction *transaction) {
+
+		XCTAssertEqual([transaction numberOfKeysInCollection:collection], (NSUInteger)[keys count],
+		    @"the failed DELETE must not have removed the collection's rows");
+
+		XCTAssertFalse([transaction hasObjectForKey:@"sentinel" inCollection:sentinelCollection],
+		    @"the transaction broadcast a phantom removal and committed instead of rolling back");
+	}];
+}
+
 @end
