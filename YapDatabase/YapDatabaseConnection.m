@@ -3644,7 +3644,21 @@ static int connectionBusyHandler(void *ptr, int count)
 - (uint64_t)incrementSnapshotInDatabase
 {
 	uint64_t newSnapshot = snapshot + 1;
-	
+
+	if (sqlite3_get_autocommit(db) != 0)
+	{
+		// This runs inside the read-write transaction, so autocommit should be off. If sqlite reports
+		// autocommit, it auto-rolled-back the transaction mid-way (e.g. SQLITE_FULL / SQLITE_IOERR on
+		// an earlier statement — see the SQLite docs on errors within a transaction). Writing the
+		// snapshot row now would run in autocommit mode and DURABLY advance the on-disk snapshot past
+		// a commit that never happened, leaving disk ahead of memory. Skip it: the COMMIT will fail
+		// and postReadWriteTransaction will treat this as a rollback.
+
+		YDBLogWarn(@"incrementSnapshotInDatabase: transaction was auto-rolled-back by sqlite;"
+		           @" skipping snapshot write to avoid a durable on-disk/in-memory snapshot mismatch.");
+		return newSnapshot;
+	}
+
 	sqlite3_stmt *statement = [self yapSetDataForKeyStatement];
 	if (statement == NULL) return newSnapshot;
 	

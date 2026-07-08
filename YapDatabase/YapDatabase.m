@@ -3176,13 +3176,23 @@ static YDBLogHandler logHandler = nil;
 		}
 	}
     
-	if (options.enableMultiProcessSupport)
+	// Every snapshot number between connectionSnapshot and maxSnapshot must have a changeset for us
+	// to reconstruct the delta. If any are missing, return nil so the caller cold-flushes and adopts
+	// the on-disk state as truth, rather than fast-forwarding to an inconsistent snapshot (which
+	// would trip the snapshot == dbSnapshot assertion in preReadTransaction/preWriteTransaction).
+	//
+	// In multiprocess mode a gap normally means another process committed. In single-process mode it
+	// should never happen in normal operation (the counter increments by exactly 1 per non-empty
+	// commit, each recording a changeset) — but it CAN if sqlite auto-rolled-back a transaction
+	// mid-way and a later autocommit write durably advanced the on-disk snapshot past a changeset
+	// that was then retracted. Either way, cold-flushing is the safe recovery, so the check is no
+	// longer gated on enableMultiProcessSupport.
 	{
 		const uint64_t expectedSnapshotsCount = maxSnapshot - connectionSnapshot;
 		if (expectedSnapshotsCount != relevantChangesets.count)
 		{
 			YDBLogVerbose(@"Expected snapshot count not found: expected(%llu) != found(%llu)."
-			              @" Database seems to have been modified from another process. Discarding changeset.",
+			              @" Discarding changeset; connection will flush and re-read the on-disk state.",
 			              expectedSnapshotsCount, (uint64_t)relevantChangesets.count);
 			return nil;
 		}

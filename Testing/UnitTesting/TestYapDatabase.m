@@ -1611,4 +1611,60 @@ static int YDBTestFailCommitHook(void *context)
 	    @"data must remain readable and correct");
 }
 
+// If the on-disk snapshot ends up ahead of the in-memory snapshot with no
+// changeset to bridge the gap — which can happen if sqlite auto-rolls-back a transaction mid-way and
+// a later autocommit write durably advances the yap2 snapshot row past a changeset that was then
+// retracted — a read that takes the disk-read path must recover by flushing and adopting the on-disk
+// snapshot, not fast-forward into the snapshot == dbSnapshot assertion.
+//
+// The bad state is manufactured directly (raw-writing the yap2 snapshot row out-of-band) so the test
+// is deterministic and doesn't depend on sqlite's version-specific auto-rollback behavior.
+- (void)testDiskSnapshotAheadOfMemoryRecoversGracefully
+{
+	NSURL *databaseURL = [self databaseURL:NSStringFromSelector(_cmd)];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:NULL];
+
+	YapDatabase *database = [[YapDatabase alloc] initWithURL:databaseURL];
+	XCTAssertNotNil(database); // single-process mode (enableMultiProcessSupport defaults to NO)
+
+	YapDatabaseConnection *connection = [database newConnection];
+
+	NSString *const collection = @"docs";
+	NSString *const key = @"k";
+
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		[transaction setObject:@"v" forKey:key inCollection:collection];
+	}];
+
+	uint64_t diskAhead = connection.snapshot + 1;
+
+	// Advance ONLY the on-disk yap2 snapshot row, out-of-band, so the in-memory snapshot stays put
+	// and no changeset exists for the new value — reproducing the end-state of #6.
+	[connection readWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+		NSString *sql = [NSString stringWithFormat:
+		    @"INSERT OR REPLACE INTO \"yap2\" (\"extension\", \"key\", \"data\") VALUES ('', 'snapshot', %llu);",
+		    (unsigned long long)diskAhead];
+		int rc = sqlite3_exec(connection->db, [sql UTF8String], NULL, NULL, NULL);
+		XCTAssertEqual(rc, SQLITE_OK, @"raw yap2 snapshot write should succeed");
+	}];
+
+	// A read on the disk-read path (long-lived) now sees the on-disk snapshot ahead of memory with no
+	// bridging changeset. It must flush and adopt the on-disk snapshot instead of asserting.
+	[connection beginLongLivedReadTransaction];
+
+	__block id value = nil;
+	[connection readWithBlock:^(YapDatabaseReadTransaction *transaction) {
+		value = [transaction objectForKey:key inCollection:collection];
+	}];
+
+	uint64_t snapshotAfter = connection.snapshot;
+
+	[connection endLongLivedReadTransaction];
+
+	XCTAssertEqual(snapshotAfter, diskAhead,
+	    @"connection must adopt the on-disk snapshot after an unbridgeable changeset gap");
+	XCTAssertEqualObjects(value, @"v",
+	    @"data must remain readable after the recovery flush");
+}
+
 @end
