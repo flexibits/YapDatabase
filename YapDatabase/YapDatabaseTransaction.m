@@ -178,28 +178,42 @@
 			// later corrupts unrelated rows.
 
 			YDBLogError(@"Couldn't commit transaction: %d %s", status, sqlite3_errmsg(connection->db));
-
-			if (isReadWriteTransaction && !sqlite3_get_autocommit(connection->db))
-			{
-				// sqlite did NOT auto-rollback; the transaction is still open.
-				// Roll it back explicitly so the outcome is deterministic
-				// (a zombie transaction would swallow every subsequent BEGIN/COMMIT).
-
-				sqlite3_stmt *rbStatement = [connection rollbackTransactionStatement];
-				if (rbStatement)
-				{
-					int rbStatus = sqlite3_step(rbStatement);
-					if (rbStatus != SQLITE_DONE)
-					{
-						YDBLogError(@"Couldn't rollback failed commit: %d %s",
-						            rbStatus, sqlite3_errmsg(connection->db));
-					}
-					sqlite3_reset(rbStatement);
-				}
-			}
 		}
 
 		sqlite3_reset(statement);
+	}
+
+	if (!committed && isReadWriteTransaction && !sqlite3_get_autocommit(connection->db))
+	{
+		// sqlite did NOT auto-rollback; the transaction is still open. This covers both a failed
+		// COMMIT step (above) and a NULL commitTransactionStatement (prepare failed, e.g.
+		// SQLITE_NOMEM after a memory warning flushed the cached statements).
+		// Roll it back explicitly so the outcome is deterministic
+		// (a zombie transaction would swallow every subsequent BEGIN/COMMIT).
+
+		sqlite3_stmt *rbStatement = [connection rollbackTransactionStatement];
+		if (rbStatement)
+		{
+			int rbStatus = sqlite3_step(rbStatement);
+			if (rbStatus != SQLITE_DONE)
+			{
+				YDBLogError(@"Couldn't rollback failed commit: %d %s",
+				            rbStatus, sqlite3_errmsg(connection->db));
+			}
+			sqlite3_reset(rbStatement);
+		}
+		else
+		{
+			// If preparing COMMIT failed with NOMEM, preparing ROLLBACK likely fails too.
+			// sqlite3_exec is a last-ditch attempt that doesn't depend on the statement cache.
+
+			int rbStatus = sqlite3_exec(connection->db, "ROLLBACK TRANSACTION;", NULL, NULL, NULL);
+			if (rbStatus != SQLITE_OK)
+			{
+				YDBLogError(@"Couldn't rollback failed commit (exec): %d %s",
+				            rbStatus, sqlite3_errmsg(connection->db));
+			}
+		}
 	}
 
 	if (isReadWriteTransaction)
