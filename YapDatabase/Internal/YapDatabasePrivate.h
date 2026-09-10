@@ -218,6 +218,7 @@ static NSString *const ext_key_class = @"class";
 	
 	BOOL hasDiskChanges;
 	BOOL enableMultiProcessSupport;
+	BOOL autoUnregisterOrphanedExtensions;
 	
 	YapBidirectionalCache<NSNumber *, YapCollectionKey *> *keyCache;
 	YapCache<YapCollectionKey *, id> *objectCache;

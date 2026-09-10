@@ -361,6 +361,20 @@ typedef NS_ENUM(NSInteger, YapDatabaseCipherCompatability) {
 @property (nonatomic, assign, readwrite) BOOL enableMultiProcessSupport;
 
 /**
+ * Whether YapDatabase should automatically unregister orphaned extensions.
+ *
+ * An orphaned extension is one that was registered at the end of the last database session, but which
+ * was not re-registered during this one. By default, at the end of the first readwrite transaction that
+ * modifies the database, YapDatabase unregisters any such extension.
+ *
+ * Set this to NO to leave orphaned extensions alone. This is useful when several processes share a
+ * database and only one of them should perform the cleanup.
+ *
+ * The default value is YES.
+ */
+@property (nonatomic, assign, readwrite) BOOL autoUnregisterOrphanedExtensions;
+
+/**
  * An optional block invoked with each sqlite3 database handle right after YapDatabase opens it,
  * including the internal handle owned by YapDatabase itself and the handle owned by each
  * YapDatabaseConnection.

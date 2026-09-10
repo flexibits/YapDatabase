@@ -31,6 +31,7 @@
 #endif
 @synthesize aggressiveWALTruncationSize = aggressiveWALTruncationSize;
 @synthesize enableMultiProcessSupport = enableMultiProcessSupport;
+@synthesize autoUnregisterOrphanedExtensions = autoUnregisterOrphanedExtensions;
 @synthesize sqliteConnectionSetup = sqliteConnectionSetup;
 
 - (id)init
@@ -44,6 +45,7 @@
 		pragmaMMapSize = 0;
 		aggressiveWALTruncationSize = (1024 * 1024 * 4); // 4 MB
         enableMultiProcessSupport = NO;
+        autoUnregisterOrphanedExtensions = YES;
 	}
 	return self;
 }
@@ -68,6 +70,7 @@
 #endif
 	copy->aggressiveWALTruncationSize = aggressiveWALTruncationSize;
     copy->enableMultiProcessSupport = enableMultiProcessSupport;
+    copy->autoUnregisterOrphanedExtensions = autoUnregisterOrphanedExtensions;
 	copy->sqliteConnectionSetup = sqliteConnectionSetup;
 
 	return copy;

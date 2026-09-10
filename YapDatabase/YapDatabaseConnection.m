@@ -214,6 +214,7 @@ static int connectionBusyHandler(void *ptr, int count)
 		YapDatabaseOptions *options = database.options;
 		
 		enableMultiProcessSupport = options.enableMultiProcessSupport;
+		autoUnregisterOrphanedExtensions = options.autoUnregisterOrphanedExtensions;
 		
 		YapDatabaseConnectionConfig *defaults = inConfig ?: database.connectionDefaults;
 		
@@ -3064,10 +3065,12 @@ static int connectionBusyHandler(void *ptr, int count)
 		// - Only once
 		// - At the end of a readwrite transaction that has made modifications to the database
 		// - Only if the modifications weren't dedicated to registering/unregistring an extension
+		// - Only if the autoUnregisterOrphanedExtensions option is enabled
 		
 		BOOL clearPreviouslyRegisteredExtensionNames = NO;
 		
-		if (changeset && !registeredExtensionsChanged && database->previouslyRegisteredExtensionNames)
+		if (changeset && !registeredExtensionsChanged && database->previouslyRegisteredExtensionNames
+		    && autoUnregisterOrphanedExtensions)
 		{
 			for (NSString *prevExtensionName in database->previouslyRegisteredExtensionNames)
 			{
